@@ -31,6 +31,8 @@ class Phandle:
         # 视网膜神经纤维层厚度 (Retinal Nerve Fiber Layer, RNFL)
         self.rnfl_od_values = None  # 右眼RNFL
         self.rnfl_os_values = None  # 左眼RNFL
+
+
 def Func_Dataloader(path):
     """
     遍历文件夹，为每个患者文件绘制图表
@@ -74,8 +76,12 @@ def Func_Dataloader(path):
                 phandle.rnfl_os_values = df_sorted.iloc[:, 16]  # 第十6列
 
                 time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
+                output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\output' + '/' + time_str
 
-                Func_plot(phandle,filename,'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\output'+'/'+time_str)
+                if not os.path.exists(output_path):
+                    os.makedirs(output_path)
+
+                Func_plot(phandle, filename, output_path)
                 # 创建Plotly图表
 
 
@@ -185,6 +191,7 @@ def Func_plot(data, filename, output_path):
     output_file = os.path.join(output_path, f'{filename.replace(".xlsx", ".html")}')
     pyo.plot(fig, filename=output_file, auto_open=False)
     print(f"成功为 {filename} 生成图表: {output_file}")
+
 
 # 主执行部分
 if __name__ == '__main__':
