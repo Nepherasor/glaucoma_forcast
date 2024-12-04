@@ -78,6 +78,8 @@ def Func_Dataloader(path):
                 Func_plot(phandle,filename,'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\output')
                 # 创建Plotly图表
 
+                jjjj
+
 
             except Exception as e:
                 print(f"处理文件 {filename} 时出错: {e}")
