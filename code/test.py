@@ -75,10 +75,8 @@ def Func_Dataloader(path):
 
                 time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
 
-                Func_plot(phandle,filename,'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\output')
+                Func_plot(phandle,filename,'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\output'+'/'+time_str)
                 # 创建Plotly图表
-
-                jjjj
 
 
             except Exception as e:
