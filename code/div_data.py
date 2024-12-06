@@ -1,4 +1,6 @@
 import pandas as pd
+import os
+import shutil
 
 def Func_div_id(path):
     try:
@@ -23,5 +25,44 @@ def Func_div_id(path):
 
 def div_data_md_isNoempty(path):
 
+    # 创建空数据文件夹
+    empty_path = os.path.join(path, 'empty')
+    os.makedirs(empty_path, exist_ok=True)
 
-path = 'filtered_data.xlsx'
+    # 创建有数据文件夹
+    md_path = os.path.join(path, 'md')
+    os.makedirs(md_path, exist_ok=True)
+
+    # 创建至少有4行数据的文件夹
+    md4_path = os.path.join(path, 'md4')
+    os.makedirs(md4_path, exist_ok=True)
+
+    # 遍历文件夹中的所有Excel文件
+    for filename in os.listdir(path):
+        # 确保只处理patient_开头的Excel文件
+        if filename.startswith('patient_') and filename.endswith('.xlsx'):
+            # 完整文件路径
+            file_path = os.path.join(path, filename)
+
+            try:
+                # 读取Excel文件
+                df = pd.read_excel(file_path)
+                # 检查第14和15列是否有数据
+                col14_data_count = df.iloc[:, 13].dropna().shape[0]
+                col15_data_count = df.iloc[:, 14].dropna().shape[0]
+
+                if col14_data_count == 0 and col15_data_count == 0:
+                    # 如果两列都完全为空，复制到empty文件夹
+                    shutil.copy(file_path, empty_path)
+                elif col14_data_count < 4 or col15_data_count < 4:
+                    # 如果任一列数据少于4行，复制到md文件夹
+                    shutil.copy(file_path, md_path)
+                else:
+                    # 如果两列至少各有4行数据，复制到md4文件夹
+                    shutil.copy(file_path, md4_path)
+            except Exception as e:
+                print(f"Error processing file {filename}: {e}")
+
+
+#path = 'filtered_data.xlsx'
+div_data_md_isNoempty(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata')
