@@ -48,7 +48,7 @@ def Func_Dataloader(path):
     # 创建输出图表的文件夹（如果不存在）
 
     time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
-    output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\output' + '/' + time_str
+    output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output' + '/' + time_str
     os.makedirs(output_path, exist_ok=True)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
