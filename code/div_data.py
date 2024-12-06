@@ -57,7 +57,6 @@ def div_data_md_isNoempty(path):
                 elif col14_data_count < 4 or col15_data_count < 4:
                     # 如果任一列数据少于4行，复制到md文件夹
                     shutil.copy(file_path, md_path)
-
                 else:
                     # 如果两列至少各有4行数据，复制到md4文件夹
                     shutil.copy(file_path, md4_path)
