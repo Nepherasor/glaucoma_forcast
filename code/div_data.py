@@ -2,6 +2,35 @@ import pandas as pd
 import os
 import shutil
 
+import random
+
+
+def Func_shuffle_and_divide_files(src_path, train_path, vaild_path, test_path, train_num=516, vaild_num=103):
+    # 确保目标文件夹存在
+    os.makedirs(train_path, exist_ok=True)
+    os.makedirs(vaild_path, exist_ok=True)
+    os.makedirs(test_path, exist_ok=True)
+
+    # 获取源文件夹中所有文件的列表
+    files = [f for f in os.listdir(src_path) if os.path.isfile(os.path.join(src_path, f))]
+
+    # 打乱文件顺序
+    random.shuffle(files)
+
+    # 选择文件复制到文件夹A
+    for f in files[:train_num]:
+        shutil.copy(os.path.join(src_path, f), os.path.join(train_path, f))
+
+    # 选择文件复制到文件夹B
+    for f in files[train_num:train_num + vaild_num]:
+        shutil.copy(os.path.join(src_path, f), os.path.join(vaild_path, f))
+
+    # 剩下的文件复制到文件夹C
+    for f in files[train_num + vaild_num:]:
+        shutil.copy(os.path.join(src_path, f), os.path.join(test_path, f))
+
+
+
 def Func_div_id(path):
     try:
         df = pd.read_excel(path, dtype={'id': str})
@@ -23,46 +52,89 @@ def Func_div_id(path):
 
     print("分组完成，每个ID的数据已保存到单独的CSV文件中。")
 
-def div_data_md_isNoempty(path):
+def check_columns_and_move(file_path, columns, dest_paths, condition):
+    try:
+        df = pd.read_excel(file_path)
+        for col_idx in columns:
+            if not df.iloc[:, col_idx].notnull().all():
+                shutil.copy(file_path, dest_paths['empty'])
+                return
+        if condition(df, columns):
+            shutil.copy(file_path, dest_paths['full'])
+        else:
+            shutil.copy(file_path, dest_paths['empty'])
+    except Exception as e:
+        print(f"Error processing file {os.path.basename(file_path)}: {e}")
 
-    # 创建空数据文件夹
-    empty_path = os.path.join(path, 'empty')
+def div_data_isNoempty(path, columns, full_path_suffix, empty_path_suffix):
+    # 创建文件夹
+    full_path = os.path.join(path+'/../', f'{full_path_suffix}')
+    empty_path = os.path.join(path+'/../', f'{empty_path_suffix}')
+    os.makedirs(full_path, exist_ok=True)
     os.makedirs(empty_path, exist_ok=True)
+    print(full_path)
+    # 遍历文件夹中的所有Excel文件
+    for filename in os.listdir(path):
+        if filename.startswith('patient_') and filename.endswith('.xlsx'):
+            file_path = os.path.join(path, filename)
+            check_columns_and_move(file_path, columns, {'full': full_path, 'empty': empty_path}, lambda df, cols: all(df.iloc[:, col].shape[0]==df.iloc[:, 1].shape[0] and df.iloc[:, col].dropna().shape[0] > 2 for col in cols))
 
-    # 创建有数据文件夹
-    md_path = os.path.join(path, 'md')
-    os.makedirs(md_path, exist_ok=True)
 
-    # 创建至少有4行数据的文件夹
-    md4_path = os.path.join(path, 'md4')
-    os.makedirs(md4_path, exist_ok=True)
+
+
+def div_data_isVaild(path, columns, full_path_suffix, empty_path_suffix):
+    # 创建文件夹
+    full_path = os.path.join(path, f'{full_path_suffix}')
+    empty_path = os.path.join(path, f'{empty_path_suffix}')
+    os.makedirs(full_path, exist_ok=True)
+    os.makedirs(empty_path, exist_ok=True)
 
     # 遍历文件夹中的所有Excel文件
     for filename in os.listdir(path):
-        # 确保只处理patient_开头的Excel文件
         if filename.startswith('patient_') and filename.endswith('.xlsx'):
-            # 完整文件路径
             file_path = os.path.join(path, filename)
+            check_columns_and_move(file_path, columns, {'full': full_path, 'empty': empty_path}, lambda df, cols: all(df.iloc[:, col].dropna().shape[0] > 2 for col in cols))
 
-            try:
-                # 读取Excel文件
-                df = pd.read_excel(file_path)
-                # 检查第14和15列是否有数据
-                col14_data_count = df.iloc[:, 13].dropna().shape[0]
-                col15_data_count = df.iloc[:, 14].dropna().shape[0]
+# path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata'
 
-                if col14_data_count == 0 and col15_data_count == 0:
-                    # 如果两列都完全为空，复制到empty文件夹
-                    shutil.copy(file_path, empty_path)
-                elif col14_data_count < 4 or col15_data_count < 4:
-                    # 如果任一列数据少于4行，复制到md文件夹
-                    shutil.copy(file_path, md_path)
-                else:
-                    # 如果两列至少各有4行数据，复制到md4文件夹
-                    shutil.copy(file_path, md4_path)
-            except Exception as e:
-                print(f"Error processing file {filename}: {e}")
+path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data'
+div_data_isNoempty(
+    path=path,
+    columns=[9, 10],  # IOP columns
+    full_path_suffix='iop',
+    empty_path_suffix='iop_empty'
+)
+#
+# div_data_isNoempty(
+#     path=path,
+#     columns=[11, 12],  # Ratio columns
+#     full_path_suffix='ratio',
+#     empty_path_suffix='ratio_empty'
+# )
+#
+# div_data_isNoempty(
+#     path=path,
+#     columns=[9, 10, 11, 12, 20, 21, 26, 27],  # All columns
+#     full_path_suffix='all4',
+#     empty_path_suffix='all4_empty'
+# )
+#
 
 
-#path = 'filtered_data.xlsx'
-div_data_md_isNoempty(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata')
+# div_data_isNoempty(
+#     path=path,
+#     columns=[9, 10, 11, 12],  # IOP and Ratio columns
+#     full_path_suffix='iopandratio',
+#     empty_path_suffix='iopandratio_empty'
+# )
+
+# div_data_isVaild(
+#     path=path,
+#     columns=[1],  # all columns
+#     full_path_suffix='vaild_data',
+#     empty_path_suffix='vaild_data_empty'
+# )
+
+# div_data_iopandratio_isNoempty(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata')
+
+# Func_shuffle_and_divide_files(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\vaild_data', r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\datageneration_data\train', r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\datageneration_data\vaild', r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\datageneration_data\test',)
