@@ -9,11 +9,41 @@ from datetime import datetime
 from sklearn.neighbors import NearestNeighbors
 from sklearn.impute import KNNImputer
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
 
+import copy
 
 all_missing_data_ratios = []
 Sample_Feqs = []
-the_last_ages =[]
+the_last_ages = []
+
+
+class result_value:
+    def __init__(self):
+        self.predicted_val = pd.Series()
+        self.true_val = pd.Series()
+
+        self.predicted_list = []
+        self.true_list = []
+
+
+class result:
+    def __init__(self):
+        self.iop_od = result_value()
+        self.iop_os = result_value()
+
+        self.cdr_od = result_value()
+        self.cdr_os = result_value()
+
+        self.md_od = result_value()
+        self.md_os = result_value()
+
+        self.rnfl_od = result_value()
+        self.rnfl_os = result_value()
+
 
 class Phandle:
     def __init__(self):
@@ -23,7 +53,7 @@ class Phandle:
         self.gender_values = None  # 初始化为None
 
         # 年龄
-        self.birth_dates = None #记录生日
+        self.birth_dates = None  #记录生日
         self.age_values = None
 
         self.diagnosis_values = None
@@ -50,7 +80,8 @@ class Phandle:
         self.rnfl_od_values = None  # 右眼RNFL
         self.rnfl_os_values = None  # 左眼RNFL
 
-        self.perid_values = None    #周期值
+        self.perid_values = None  #周期值
+
 
 def Func_Dataloader_single(file_path):
     data = Phandle()
@@ -81,8 +112,38 @@ def Func_Dataloader_single(file_path):
 
     return data
 
+def build_lstm_model(input_shape):
+    model = Sequential()
+    model.add(LSTM(64, activation='relu', input_shape=input_shape))
+    model.add(Dense(1))  # 输出一个值，表示预测的iop值
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
 
-def Func_Process_Inter(extend_path,extend_empty_path):
+def Func_Process_Inter_LSTM(data_extend,data_extend_empty,results_Process_Inter_LSTM,output_path):
+
+def Func_Process_Inter_KNN(data_extend,data_extend_empty,results_Process_Inter_KNN,output_path):
+    data_Process_Inter_KNN = copy.copy(data_extend)
+
+    data_Process_Inter_KNN.iop_od_values = Func_Algorithm_Inter_KNN(data_extend_empty.iop_od_values)
+    data_Process_Inter_KNN.iop_os_values = Func_Algorithm_Inter_KNN(data_extend_empty.iop_os_values)
+    # data_Process_Inter_KNN.cdr_od_values = Func_Algorithm_Inter_KNN(data_extend_empty.cdr_od_values)
+    # data_Process_Inter_KNN.cdr_os_values = Func_Algorithm_Inter_KNN(data_extend_empty.cdr_os_values)
+
+    mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(data_extend_empty.iop_od_values,
+                                                                         data_Process_Inter_KNN.iop_od_values,
+                                                                         data_extend.iop_od_values)
+    results_Process_Inter_KNN.iop_od.predicted_list.append(predicted_value)
+    results_Process_Inter_KNN.iop_od.true_list.append(true_value)
+
+    mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(data_extend_empty.iop_os_values,
+                                                                         data_Process_Inter_KNN.iop_os_values,
+                                                                         data_extend.iop_os_values)
+    results_Process_Inter_KNN.iop_os.predicted_list.append(predicted_value)
+    results_Process_Inter_KNN.iop_os.true_list.append(true_value)
+
+    path = output_path + '/result_data_extend_KNN_process/'
+    Func_output_excel(data_Process_Inter_KNN, path)
+def Func_Process_Inter(extend_path, extend_empty_path):
     """
     path (str): 包含患者Excel文件的文件夹路径
     """
@@ -90,7 +151,10 @@ def Func_Process_Inter(extend_path,extend_empty_path):
 
     time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
     output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output' + '/' + time_str
-    data_Process_Inter_KNN = Phandle()
+
+    results_Process_Inter_KNN = result()
+    results_Process_Inter_LSTM = result()
+
     os.makedirs(output_path, exist_ok=True)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -106,15 +170,30 @@ def Func_Process_Inter(extend_path,extend_empty_path):
                 # 读取Excel文件
                 data_extend = Func_Dataloader_single(file_path1)
                 data_extend_empty = Func_Dataloader_single(file_path2)
+                # Func_Process_Inter_KNN(data_extend, data_extend_empty, results_Process_Inter_KNN, output_path)
 
-                data_cash1 = data_extend_empty
-                data_Process_Inter_KNN.iop_od_values = Func_Algorithm_Inter_KNN(data_cash1.iop_od_values)
-                data_Process_Inter_KNN.iop_os_values = Func_Algorithm_Inter_KNN(data_cash1.iop_os_values)
-                print(11111)
-                Func_Analyse_Evaluate_Series(data_extend_empty.iop_od_values,data_Process_Inter_KNN.iop_od_values,data_extend.iop_od_values)
-                print(11111)
+                data_Process_Inter_LSTM = copy.copy(data_extend)
+                # data_Process_Inter_LSTM.iop_od_values = Func_Algorithm_Inter_LSTM(data_extend_empty)
+                # data_Process_Inter_LSTM.iop_os_values = Func_Algorithm_Inter_LSTM(data_extend_empty)
             except Exception as e:
                 print(f"处理文件 {filename} 时出错: {e}")
+
+    # results_Process_Inter_KNN.iop_od.predicted_val = pd.concat(results_Process_Inter_KNN.iop_od.predicted_list,ignore_index=True)
+    # results_Process_Inter_KNN.iop_od.true_val = pd.concat(results_Process_Inter_KNN.iop_od.true_list, ignore_index=True)
+    # mse,mae,accuracy = Func_Analyse_Evaluate(results_Process_Inter_KNN.iop_od.predicted_val, results_Process_Inter_KNN.iop_od.true_val)
+    #
+    # # 将 data_extend 转换为 DataFrame
+    # df = pd.DataFrame({
+    #     'predicted_val': results_Process_Inter_KNN.iop_od.predicted_val,
+    #     'true_val': results_Process_Inter_KNN.iop_od.true_val,
+    #     'mse':mse,
+    #     'mae':mae,
+    #     'Acc':accuracy
+    #
+    # })
+    #
+    # # 输出成excel文件
+    # df.to_excel(output_path + '/Analyse_data_extend_KNN_process' + '.xlsx', index=False, header=True)
 
 
 
@@ -131,7 +210,6 @@ def Func_Dataloader2(path):
     os.makedirs(output_path, exist_ok=True)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-
 
     # 遍历文件夹中的所有Excel文件
     for filename in os.listdir(path):
@@ -151,9 +229,6 @@ def Func_Dataloader2(path):
                 # data_extend.ID = filename
                 # 按照时间排序
                 df_sorted = df.sort_values('treat_date').reset_index(drop=True)
-
-
-
 
                 phandle.ID = df_sorted.iloc[:, 0]
 
@@ -193,9 +268,8 @@ def Func_Dataloader2(path):
                 phandle.rnfl_od_values = df_sorted.iloc[:, 20:25].mean(axis=1)
                 phandle.rnfl_os_values = df_sorted.iloc[:, 26:31].mean(axis=1)
 
-
-                data_extend = Func_time_series_extend_nearest(phandle,data_extend)
-                data_extend_empty =Func_create_missing_data(data_extend)
+                data_extend = Func_time_series_extend_nearest(phandle, data_extend)
+                data_extend_empty = Func_create_missing_data(data_extend)
                 # Func_calculate_empty_data_ratio(phandle,'single')
                 #
 
@@ -209,10 +283,9 @@ def Func_Dataloader2(path):
     # Func_calculate_empty_data_ratio(0, 'all')
 
 
-
 def Func_Algorithm_Inter_KNN(data_serie):
     # 分离出值为666的索引
-    data_series = data_serie
+    data_series = data_serie.copy()
 
     indices_to_impute = data_series[data_series == 666].index
 
@@ -238,6 +311,26 @@ def Func_Algorithm_Inter_KNN(data_serie):
     # print(data_series)
 
     return data_series
+
+
+def Func_Analyse_Evaluate(predicted_series, true_series, tolerance=0.1):
+    # 计算均方误差（MSE）
+    mse = mean_squared_error(true_series, predicted_series)
+
+    # 计算平均绝对误差（MAE）
+    mae = mean_absolute_error(true_series, predicted_series)
+
+    # 判断预测值是否在真实值的 ±tolerance 范围内
+    is_accurate = ((predicted_series >= true_series * (1 - tolerance)) & (
+                predicted_series <= true_series * (1 + tolerance))).astype(int)
+
+    # 全部标记为 1 的真实标签
+    true_labels = pd.Series([1] * len(true_series))
+
+    # 计算准确率
+    accuracy = accuracy_score(true_labels, is_accurate)
+
+    return mse,mae,accuracy
 
 
 def Func_Analyse_Evaluate_Series(original_series, filled_series, reference_series):
@@ -268,28 +361,36 @@ def Func_Analyse_Evaluate_Series(original_series, filled_series, reference_serie
     mse = mean_squared_error(true_values, predicted_values)
     mae = mean_absolute_error(true_values, predicted_values)
 
+    # print(mse,mae,predicted_values, true_values)
     # 返回误差指标
     return mse, mae, predicted_values, true_values
 
-def Func_origin_data_feq(data):
-    time_scale = round(np.sum([(data.treat_dates[i] - data.treat_dates[i - 1]).days for i in range(1, len(data.treat_dates))])/len(data.treat_dates))
-    the_last_age = data.age_values[len(data.age_values)-1]
 
-    if time_scale>180:
+def Func_origin_data_feq(data):
+    time_scale = round(
+        np.sum([(data.treat_dates[i] - data.treat_dates[i - 1]).days for i in range(1, len(data.treat_dates))]) / len(
+            data.treat_dates))
+    the_last_age = data.age_values[len(data.age_values) - 1]
+
+    if time_scale > 180:
         time_scale = 180
-    elif time_scale< 14:
+    elif time_scale < 14:
         time_scale = 14
 
     # the_first_age = data.age_values[0]
-    return time_scale,the_last_age
-def Func_time_series_extend_nearest(data,data_extend):
-    Sample_Feq,the_last_age= Func_origin_data_feq(data)
+    return time_scale, the_last_age
+
+
+def Func_time_series_extend_nearest(data, data_extend):
+    Sample_Feq, the_last_age = Func_origin_data_feq(data)
     # # Sample_Feqs.append(Sample_Feq)
     # # the_last_ages.append(the_last_age)
     #
-    data_extend = Func_expand_time_series_with_neighbors(data, data_extend,Sample_Feq)
+    data_extend = Func_expand_time_series_with_neighbors(data, data_extend, Sample_Feq)
     return data_extend
-def Func_expand_time_series_with_neighbors(data,data_extend, Sample_Feq):
+
+
+def Func_expand_time_series_with_neighbors(data, data_extend, Sample_Feq):
     """
     扩展周期不固定的时序数据为固定周期，保留有效数据数，其他时间点为空。
 
@@ -299,10 +400,9 @@ def Func_expand_time_series_with_neighbors(data,data_extend, Sample_Feq):
     """
     # 假设original_data是一个DataFrame，包含 'time' 和 'value' 列
 
-
     # 获取原始时间的起止时间
     start_time = data.treat_dates[0]
-    end_time = data.treat_dates[len(data.treat_dates)-1]
+    end_time = data.treat_dates[len(data.treat_dates) - 1]
 
     # 生成固定周期长度的时间点
     expanded_time = pd.date_range(start=start_time, end=end_time, freq=pd.Timedelta(days=Sample_Feq))
@@ -310,7 +410,7 @@ def Func_expand_time_series_with_neighbors(data,data_extend, Sample_Feq):
     data.perid_values = pd.Series(Sample_Feq)
     # data_extend.perid_values = Sample_Feq
 
-    for attribute in ['ID','gender_values','birth_dates','perid_values']:
+    for attribute in ['ID', 'gender_values', 'birth_dates', 'perid_values']:
         values = getattr(data, attribute)
         # 存储扩展后的值
         expanded_values = []
@@ -321,7 +421,7 @@ def Func_expand_time_series_with_neighbors(data,data_extend, Sample_Feq):
         setattr(data_extend, attribute, pd.Series(expanded_values))
 
     # 对每个属性进行扩展
-    for attribute in ['age_values', 'diagnosis_values','iop_od_values', 'iop_os_values',
+    for attribute in ['age_values', 'diagnosis_values', 'iop_od_values', 'iop_os_values',
                       'cdr_od_values', 'cdr_os_values', 'md_od_values', 'md_os_values',
                       'rnfl_od_values', 'rnfl_os_values']:
 
@@ -352,18 +452,25 @@ def Func_expand_time_series_with_neighbors(data,data_extend, Sample_Feq):
         setattr(data_extend, attribute, pd.Series(expanded_values))
 
     data_extend.treat_dates = pd.Series(expanded_time)
-
-
+    if(len(data_extend.treat_dates)>2):
+        path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process'
     ####输出csv
+        Func_output_excel(data_extend, path)
+
+    return data_extend
+
+
+
+def Func_output_excel(data_extend,path):
+    ####输出excel
     # 将 data_extend 转换为 DataFrame
     df = pd.DataFrame({
-        'id':data_extend.ID,
+        'id': data_extend.ID,
         'gender_values': data_extend.gender_values,
-        'birth_dates':data_extend.birth_dates,
+        'birth_dates': data_extend.birth_dates,
         'age_values': data_extend.age_values,
-        'diagnosis_values':data_extend.diagnosis_values,
+        'diagnosis_values': data_extend.diagnosis_values,
         'treat_dates': data_extend.treat_dates,
-
 
         'iop_od_values': data_extend.iop_od_values,
         'iop_os_values': data_extend.iop_os_values,
@@ -373,68 +480,39 @@ def Func_expand_time_series_with_neighbors(data,data_extend, Sample_Feq):
         'md_os_values': data_extend.md_os_values,
         'rnfl_od_values': data_extend.rnfl_od_values,
         'rnfl_os_values': data_extend.rnfl_os_values,
-        'period_values':data_extend.perid_values
+        'period_values': data_extend.perid_values
     })
 
-    # 输出成CSV文件
-    path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process'
+    # 输出成excel文件
+
     os.makedirs(path, exist_ok=True)
-    df.to_excel(path+'/patient_'+str(data_extend.ID[0])+'.xlsx', index=False,header=True)
-
-
-    # print(1111)
-    # 填充剩余的时间点为空（NaN）
-    # expanded_data['value'] = expanded_data['value'].fillna(np.nan)
-
-    return data_extend
-
-
+    df.to_excel(path + '/patient_' + str(data_extend.ID[0]) + '.xlsx', index=False, header=True)
 
 #眼压 0.15 杯盘比 0.3 视野 0.5 RNFL 0.5
 def Func_create_missing_data(data):
     data_empty = data
-    for attribute in ['iop_od_values', 'iop_os_values','cdr_od_values', 'cdr_os_values',
-                      'md_od_values', 'md_os_values','rnfl_od_values', 'rnfl_os_values']:
+    for attribute in ['iop_od_values', 'iop_os_values', 'cdr_od_values', 'cdr_os_values',
+                      'md_od_values', 'md_os_values', 'rnfl_od_values', 'rnfl_os_values']:
 
         # 获取原始数据的值
         values = getattr(data, attribute)
         if 'iop' in attribute:
             setattr(data_empty, attribute, Func_cmd_1(values, 0.15))
-        elif 'cdr' in attribute:
-            setattr(data_empty, attribute, Func_cmd_1(values, 0.3))
+        # elif 'cdr' in attribute:
+        #     setattr(data_empty, attribute, Func_cmd_1(values, 0.3))
         # elif 'md' in attribute:
         #     setattr(data_empty, attribute, Func_cmd_1(values, 0.15))
         # elif 'rnfl' in attribute:
         #     setattr(data_empty, attribute, Func_cmd_1(values, 0.3))
 
-
     # 将 data_extend 转换为 DataFrame
-    df = pd.DataFrame({
-        'id':data_empty.ID,
-        'gender_values': data_empty.gender_values,
-        'birth_dates':data_empty.birth_dates,
-        'age_values': data_empty.age_values,
-        'diagnosis_values':data_empty.diagnosis_values,
-        'treat_dates': data_empty.treat_dates,
+
+    if (len(data_empty.treat_dates)>2):
+        path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_empty_process'
+        Func_output_excel(data_empty, path)
+    return data_empty
 
 
-        'iop_od_values': data_empty.iop_od_values,
-        'iop_os_values': data_empty.iop_os_values,
-        'cdr_od_values': data_empty.cdr_od_values,
-        'cdr_os_values': data_empty.cdr_os_values,
-        'md_od_values': data_empty.md_od_values,
-        'md_os_values': data_empty.md_os_values,
-        'rnfl_od_values': data_empty.rnfl_od_values,
-        'rnfl_os_values': data_empty.rnfl_os_values,
-        'period_values':data_empty.perid_values
-    })
-
-    # 输出成CSV文件
-    path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_empty_process'
-    os.makedirs(path, exist_ok=True)
-    df.to_excel(path+'/patient_'+str(data_empty.ID[0])+'.xlsx', index=False,header=True)
-    # print(1111)
-    return  data_empty
 def Func_cmd_1(series, missing_rate):
     """
     找出Series的非空数据，并按照给定概率制造缺失数据，缺失部分用X代替。
@@ -460,7 +538,8 @@ def Func_cmd_1(series, missing_rate):
 
     return new_series
 
-def Func_calculate_empty_data_ratio(data,flag):
+
+def Func_calculate_empty_data_ratio(data, flag):
     """
     计算单个患者各项测量值的空数据占比。
 
@@ -488,7 +567,9 @@ def Func_calculate_empty_data_ratio(data,flag):
         for key, description in measurements.items():
             if hasattr(data, key):  # 检查属性是否存在
                 total_values = len(data.__getattribute__(key))
-                missing_values = data.__getattribute__(key).isnull().sum() if isinstance(data.__getattribute__(key), pd.Series) else data.__getattribute__(key).isna().sum()
+                missing_values = data.__getattribute__(key).isnull().sum() if isinstance(data.__getattribute__(key),
+                                                                                         pd.Series) else data.__getattribute__(
+                    key).isna().sum()
                 missing_data_ratios[description] = missing_values / total_values if total_values > 0 else 0.0
 
         all_missing_data_ratios.append(missing_data_ratios)
@@ -501,7 +582,7 @@ def Func_calculate_empty_data_ratio(data,flag):
                 ratio[description] for ratio in all_missing_data_ratios) / len(all_missing_data_ratios)
 
         # 输出每个类型的空数据占比的平均值
-        print('总平均：',average_missing_data_ratios)
+        print('总平均：', average_missing_data_ratios)
         return average_missing_data_ratios
 
 
@@ -526,7 +607,7 @@ def Func_Summary_Feq_plot(output_path, Sample_Feqs, the_last_ages):
 
         # 创建Histogram
         hist = px.histogram(group_data, x='Sample_Feq', nbins=30,
-                             title=f'Sample_Feq Distribution for Age Group {age_group}')
+                            title=f'Sample_Feq Distribution for Age Group {age_group}')
 
         figs.append(hist)
 
@@ -540,7 +621,8 @@ def Func_Summary_Feq_plot(output_path, Sample_Feqs, the_last_ages):
 
     # 绘制第五张图：每个用户的 Sample_Feq 与 their last age 的关系
     age_vs_feq_fig = px.scatter(plot_frame, x='the_last_age', y='Sample_Feq',
-                                title='Sample_Feq vs Last Age (the_last_age)', labels={'the_last_age': 'Age', 'Sample_Feq': 'Sample_Feq'})
+                                title='Sample_Feq vs Last Age (the_last_age)',
+                                labels={'the_last_age': 'Age', 'Sample_Feq': 'Sample_Feq'})
     figs.append(age_vs_feq_fig)
 
     # 将所有图表保存为一个HTML文件
@@ -551,8 +633,6 @@ def Func_Summary_Feq_plot(output_path, Sample_Feqs, the_last_ages):
             f.write(fig.to_html(full_html=False, include_plotlyjs='cdn'))
 
     print(f"All charts saved to {output_file}")
-
-
 
 
 def Func_plot(data, filename, output_path):
@@ -706,6 +786,7 @@ def Func_plot(data, filename, output_path):
     pyo.plot(fig, filename=output_file, auto_open=False)
     print(f"成功为 {filename} 生成图表: {output_file}")
 
+
 # 主执行部分
 if __name__ == '__main__':
     # 指定文件夹路径
@@ -713,8 +794,8 @@ if __name__ == '__main__':
     extend_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process')
     extend_empty_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_empty_process')
     # 加载数据并绘制图表
-    # Func_Dataloader(folder_path)          #制造缺失数据和对比
-    Func_Process_Inter(extend_path,extend_empty_path)
+    # Func_Dataloader2(folder_path)          #制造缺失数据和对比
+    Func_Process_Inter(extend_path, extend_empty_path)
     # time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
     # output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output' + '/' + time_str
     # os.makedirs(output_path, exist_ok=True)
