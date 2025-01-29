@@ -5,7 +5,7 @@ import shutil
 import random
 
 
-def Func_shuffle_and_divide_files(src_path, train_path, vaild_path, test_path, train_num=516, vaild_num=103):
+def Func_shuffle_and_divide_files(src_path, train_path, vaild_path, test_path, train_num=460, vaild_num=197):
     # 确保目标文件夹存在
     os.makedirs(train_path, exist_ok=True)
     os.makedirs(vaild_path, exist_ok=True)
@@ -97,13 +97,13 @@ def div_data_isVaild(path, columns, full_path_suffix, empty_path_suffix):
 
 # path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata'
 
-path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data'
-div_data_isNoempty(
-    path=path,
-    columns=[9, 10],  # IOP columns
-    full_path_suffix='iop',
-    empty_path_suffix='iop_empty'
-)
+# path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data'
+# div_data_isNoempty(
+#     path=path,
+#     columns=[9, 10],  # IOP columns
+#     full_path_suffix='iop',
+#     empty_path_suffix='iop_empty'
+# )
 #
 # div_data_isNoempty(
 #     path=path,
@@ -138,3 +138,4 @@ div_data_isNoempty(
 # div_data_iopandratio_isNoempty(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata')
 
 # Func_shuffle_and_divide_files(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\vaild_data', r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\datageneration_data\train', r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\datageneration_data\vaild', r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\data\datageneration_data\test',)
+Func_shuffle_and_divide_files(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process',r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_LSTM_process\train',r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_LSTM_process\val',r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_LSTM_process\test')
