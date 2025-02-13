@@ -14,22 +14,30 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras import Sequential
 from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import LSTM, Dense,Masking,Dropout
-from tensorflow.keras import layers, models, optimizers
+from tensorflow.keras.layers import LSTM, Dense,Masking,Dropout,TimeDistributed,Concatenate
+from tensorflow.keras import layers, Model, Input, Sequential
 from tensorflow.keras.optimizers import Adam
 from keras.regularizers import l2
 import traceback
 from tensorflow.keras.layers import Dense, LeakyReLU, BatchNormalization
 import copy
+import gc
+import joblib
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
 
-
-
+# 存储所有缺失数据比例
 all_missing_data_ratios = []
+# 存储采样频率
 Sample_Feqs = []
+# 存储最后年龄
 the_last_ages = []
 
 
 class result_value:
+    """
+    存储预测值和真实值的类
+    """
     def __init__(self):
         self.predicted_val = pd.Series()
         self.true_val = pd.Series()
@@ -39,68 +47,71 @@ class result_value:
 
 
 class result:
+    """
+    存储各项指标预测结果的类
+    """
     def __init__(self):
-        self.iop_od = result_value()
-        self.iop_os = result_value()
-
-        self.cdr_od = result_value()
-        self.cdr_os = result_value()
-
-        self.md_od = result_value()
-        self.md_os = result_value()
-
-        self.rnfl_od = result_value()
-        self.rnfl_os = result_value()
+        self.iop_od = result_value() # 右眼眼压
+        self.iop_os = result_value() # 左眼眼压
+        
+        self.cdr_od = result_value() # 右眼杯盘比
+        self.cdr_os = result_value() # 左眼杯盘比
+        
+        self.md_od = result_value() # 右眼视野
+        self.md_os = result_value() # 左眼视野
+        
+        self.rnfl_od = result_value() # 右眼视网膜神经纤维层厚度
+        self.rnfl_os = result_value() # 左眼视网膜神经纤维层厚度
 
 
 class Phandle:
+    """
+    存储患者数据的类
+    """
     def __init__(self):
-        # 性别转换：女性为0，男性为1
-        self.ID = None
-        self.treat_dates = None  # 记录日期
-        self.gender_values = None  # 初始化为None
-
-        # 年龄
-        self.birth_dates = None  #记录生日
-        self.age_values = None
-
-        self.diagnosis_values = None
-
-        # 眼压 (Intraocular Pressure, IOP)
-        self.iop_od_values = None  # 右眼眼压
-        self.iop_os_values = None  # 左眼眼压
-
-        self.del_iop_od_values = None  # 右眼眼压差
-        self.del_iop_os_values = None  # 左眼眼压差
-
-        # 杯盘比 (Cup-to-Disc Ratio, CDR)
-        self.cdr_od_values = None  # 右眼杯盘比
-        self.cdr_os_values = None  # 左眼杯盘比
-
-        self.del_cdr_od_values = None  # 右眼杯盘比差
-        self.del_cdr_os_values = None  # 左眼杯盘比差
-
-        # 视野 (Mean Deviation, MD)
-        self.md_od_values = None  # 右眼视野
-        self.md_os_values = None  # 左眼视野
-
-        # 视网膜神经纤维层厚度 (Retinal Nerve Fiber Layer, RNFL)
-        self.rnfl_od_values = None  # 右眼RNFL
-        self.rnfl_os_values = None  # 左眼RNFL
-
-        self.period_values = None  #周期值
+        self.ID = None # 患者ID
+        self.treat_dates = None # 就诊日期
+        self.gender_values = None # 性别(0-女,1-男)
+        
+        self.birth_dates = None # 出生日期
+        self.age_values = None # 年龄
+        
+        self.diagnosis_values = None # 诊断结果
+        
+        # 眼压数据
+        self.iop_od_values = None # 右眼眼压
+        self.iop_os_values = None # 左眼眼压
+        
+        self.del_iop_od_values = None # 右眼眼压差值
+        self.del_iop_os_values = None # 左眼眼压差值
+        
+        # 杯盘比数据
+        self.cdr_od_values = None # 右眼杯盘比
+        self.cdr_os_values = None # 左眼杯盘比
+        
+        self.del_cdr_od_values = None # 右眼杯盘比差值
+        self.del_cdr_os_values = None # 左眼杯盘比差值
+        
+        # 视野数据
+        self.md_od_values = None # 右眼视野
+        self.md_os_values = None # 左眼视野
+        
+        # 视网膜神经纤维层厚度数据
+        self.rnfl_od_values = None # 右眼RNFL
+        self.rnfl_os_values = None # 左眼RNFL
+        
+        self.period_values = None # 就诊周期
 
 
 def Func_Dataloader_single(file_path):
     """
-    功能：
-    加载单个患者的Excel文件，读取其治疗数据，并排序。
-
-    输入：
-    - file_path (str): 单个患者数据的Excel文件路径。
-
-    输出：
-    - data (Phandle): 一个包含患者信息的 Phandle 对象。
+    加载单个患者的Excel文件数据
+    
+    Args:
+        file_path: Excel文件路径
+        
+    Returns:
+        data: 包含患者数据的Phandle对象
     """
     data = Phandle()
     df = pd.read_excel(file_path)
@@ -133,6 +144,17 @@ def Func_Dataloader_single(file_path):
 
 
 def Func_build_gan_model(input_dim):
+    """
+    构建GAN模型
+    
+    Args:
+        input_dim: 输入维度
+        
+    Returns:
+        generator: 生成器模型
+        discriminator: 判别器模型
+        gan: 完整GAN模型
+    """
     # 构建生成器
     generator = Sequential([
         Dense(256, input_dim=input_dim, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(1e-4)),
@@ -162,7 +184,7 @@ def Func_build_gan_model(input_dim):
         metrics=['accuracy']
     )
 
-    # 构建 GAN
+    # 构建完整GAN
     discriminator.trainable = False
     gan = Sequential([generator, discriminator], name="GAN")
     gan.compile(
@@ -175,15 +197,16 @@ def Func_build_gan_model(input_dim):
 
 def Func_Process_Inter_GAN_Multimodal(extend_train_path,extend_test_path, extend_val_path, gan_model_path=None):
     """
-    使用多模态 GAN 模型填补缺失数据。
-
-    输入：
-    - extend_test_path (str): 测试数据路径。
-    - extend_val_path (str): 验证数据路径。
-    - gan_model_path (str): GAN 模型路径（可选，如果提供则加载预训练模型）。
-
-    输出：
-    - Excel 文件，包含 GANs 的预测结果和误差分析。
+    使用多模态GAN模型处理数据
+    
+    Args:
+        extend_train_path: 训练数据路径
+        extend_test_path: 测试数据路径
+        extend_val_path: 验证数据路径
+        gan_model_path: 预训练GAN模型路径(可选)
+        
+    Returns:
+        None,结果保存到文件
     """
     time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
     output_path = f'E:/BaiduSyncdisk/QZZ/data_generation/output/GAN_Multimodal_{time_str}'
@@ -457,394 +480,462 @@ def Func_train_lstm_model(x, y, window_size):
     return model
 
 
-# LSTM 构建 TGAN 模型
+
+# def Func_Process_Inter_tGAN_Multimodal(extend_train_path,extend_test_path, extend_val_path, tgan_model_path=None):
+#         """
+#         使用多模态 GAN 模型填补缺失数据。
+
+#         输入：
+#         - extend_test_path (str): 测试数据路径。
+#         - extend_val_path (str): 验证数据路径。
+#         - gan_model_path (str): GAN 模型路径（可选，如果提供则加载预训练模型）。
+
+#         输出：
+#         - Excel 文件，包含 GANs 的预测结果和误差分析。
+#         """
+#         time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
+#         output_path = f'E:/BaiduSyncdisk/QZZ/data_generation/output/tGAN_Multimodal_{time_str}'
+#         os.makedirs(output_path, exist_ok=True)
+
+#         # 特征列
+#         feature_columns = ['gender_values', 'age_values', 'iop_od_values', 'iop_os_values', 'cdr_od_values',
+#                            'cdr_os_values', 'md_od_values', 'md_os_values', 'rnfl_od_values', 'rnfl_os_values',
+#                            'period_values']
+
+        
+        
+#         # 滑动窗口参数
+#         window_size = 4  # 每个时间序列的长度为7
+#         stride = 1  # 每次滑动1步
+#         FILL_VALUE = 666
+#         # 创建一个空列表，用于存储用户数据
+#         tGAN_all_data = []  # 存储未标准化的用户数据
+#         missing_mask = []   # 存储缺失值掩码
+
+#         # 如果有模型路径，则加载模型，否则构建一个新模型
+#         tgan_model_path = None
+#         if tgan_model_path:
+#             generator = load_model(tgan_model_path)
+#         else:
+#             generator, discriminator, gan = Func_build_conditional_tgan_model(input_dim=len(feature_columns),fill_val=FILL_VALUE)
+
+#             # 读取每个用户的数据（每个文件代表一个用户）
+#             for filename in os.listdir(extend_train_path):
+#                 if filename.startswith('patient_') and filename.endswith('.xlsx'):
+#                     file_path = os.path.join(extend_train_path, filename)
+#                     try:
+#                         # 读取 Excel 文件
+#                         data_extend = Func_Dataloader_single(file_path)
 
 
-def Func_build_conditional_tgan_model(input_dim,fill_val,window_size=7):
-    """
-    构建一个"有条件"的时序GAN，用于缺失插值示例：
-      - 生成器输入: (window_size, 2*input_dim)  [ (X_partial, mask) ]
-      - 判别器输入: (window_size, 2*input_dim)  [ (X_filled, mask) or (X_real, mask) ]
-    返回: (generator, discriminator, gan)
-    """
+#                     except Exception as e:
+#                         print(f"处理文件 {filename} 时出错: {e}")
 
-    # ---------- 构建生成器 ----------
-    generator = Sequential(name="Generator")
-    generator.add(layers.Input(shape=(window_size, 2*input_dim)))
-    # 你可以自行决定要不要Masking，若fill_value=666则需自定义处理；很多人会用0表示缺失
-    generator.add(layers.Masking(mask_value=fill_val))
+#             # 将所有用户的处理数据合并成三维数组
 
-    generator.add(layers.LSTM(256, activation='relu', return_sequences=True))
-    generator.add(layers.BatchNormalization(momentum=0.8))
-    generator.add(layers.LeakyReLU(0.2))
-    generator.add(layers.Dropout(0.2))
 
-    generator.add(layers.LSTM(512, activation='relu', return_sequences=True))
-    generator.add(layers.BatchNormalization(momentum=0.8))
-    generator.add(layers.LeakyReLU(0.2))
-    generator.add(layers.Dropout(0.2))
 
-    # 输出维度: (window_size, input_dim)，即对缺失位置的估计
-    generator.add(layers.LSTM(input_dim, activation='tanh', return_sequences=True))
+#             # 训练 GANs
 
-    # ---------- 构建判别器 ----------
-    discriminator = Sequential(name="Discriminator")
-    discriminator.add(layers.Input(shape=(window_size, 2*input_dim)))
-    # 如果仍想Masking就自己改(比如fill_value=666).
-    # 但通常Conditional-GAN会把缺失设为0，mask为0/1，就不走Masking层。
 
-    discriminator.add(layers.LSTM(512, activation='relu', return_sequences=True))
-    discriminator.add(layers.LeakyReLU(0.2))
-    discriminator.add(layers.Dropout(0.3))
+#             # 保存模型
+#             generator.save(output_path + '/tGAN_inter_model.keras')
 
-    discriminator.add(layers.LSTM(256, activation='relu', return_sequences=False))
-    discriminator.add(layers.LeakyReLU(0.2))
-    discriminator.add(layers.Dropout(0.3))
+    # ##预测部分
 
-    discriminator.add(layers.Dense(1, activation='sigmoid'))
+def Func_build_conditional_tgan_model(input_dim, fill_val=666):
+    """构建条件式TGAN模型"""
 
-    # 判别器编译
-    discriminator.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-
-    # ---------- 构建GAN: 先freeze判别器 ----------
-    discriminator.trainable = False
-    gan = Sequential(name="GAN")
-    gan.add(generator)
-    gan.add(discriminator)
-    gan.compile(optimizer='adam', loss='binary_crossentropy')
-
+    
+    # 生成器
+    def build_generator():
+        # 主输入：时间序列数据
+        main_input = Input(shape=(None, input_dim))
+        # 掩码输入：标记缺失值位置
+        mask_input = Input(shape=(None, input_dim))
+        
+        # 合并输入
+        merged = Concatenate()([main_input, mask_input])
+        
+        # 编码器
+        x = LSTM(128, return_sequences=True)(merged)
+        x = Dropout(0.3)(x)
+        x = LSTM(64, return_sequences=True)(x)
+        x = Dropout(0.3)(x)
+        
+        # 解码器
+        x = TimeDistributed(Dense(32, activation='relu'))(x)
+        x = TimeDistributed(Dense(input_dim, activation='tanh'))(x)
+        
+        return Model([main_input, mask_input], x, name='generator')
+    
+    # 判别器
+    def build_discriminator():
+        # 真实数据输入
+        real_input = Input(shape=(None, input_dim))
+        # 掩码输入
+        mask_input = Input(shape=(None, input_dim))
+        
+        # 合并输入
+        merged = Concatenate()([real_input, mask_input])
+        
+        # 特征提取
+        x = LSTM(128, return_sequences=True)(merged)
+        x = Dropout(0.3)(x)
+        x = LSTM(64)(x)
+        x = Dropout(0.3)(x)
+        
+        # 判别输出
+        output = Dense(1, activation='sigmoid')(x)
+        
+        return Model([real_input, mask_input], output, name='discriminator')
+    
+    # 构建完整GAN
+    def build_gan(generator, discriminator):
+        discriminator.trainable = False
+        
+        # GAN输入
+        gan_input = Input(shape=(None, input_dim))
+        mask_input = Input(shape=(None, input_dim))
+        
+        # 生成器输出
+        generated = generator([gan_input, mask_input])
+        
+        # 判别器判断生成数据
+        validity = discriminator([generated, mask_input])
+        
+        return Model([gan_input, mask_input], validity, name='gan')
+    
+    # 实例化模型
+    generator = build_generator()
+    discriminator = build_discriminator()
+    gan = build_gan(generator, discriminator)
+    
     return generator, discriminator, gan
 
-
-def Func_train_tgan_conditional(
-        generator, discriminator, gan,
-        train_data,  # (n_samples, window_size, input_dim), 其中真实缺失用什么表示都行
-        real_mask,  # (n_samples, window_size, input_dim), 1=观测, 0=真实缺失
-        input_dim,
-        batch_size=16,
-        epochs=100,
-        missing_rate=0.3,  # 对可观测区域额外挖洞比例
-        fill_value=0.0  # 人工挖洞后用什么值填
-):
-    """
-    训练条件式 TGAN，既含“真实缺失”又要额外在可观测区域挖洞。
-    - train_data: shape (N, T, D)
-    - real_mask: shape (N, T, D)  (1=有值, 0=缺失)
-    - missing_rate: 在real_mask=1的地方，再随机挖多少
-    """
-    num_samples = train_data.shape[0]
-    window_size = train_data.shape[1]
-
+def Func_train_tgan_conditional(generator, discriminator, gan, train_data, real_mask, 
+                              input_dim, batch_size=16, epochs=100, missing_rate=0.2, 
+                              fill_value=666):
+    """训练条件式TGAN模型"""
+    
+    # 编译模型
+    optimizer = Adam(learning_rate=0.0002, beta_1=0.5)
+    discriminator.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
+    gan.compile(optimizer=optimizer, loss='binary_crossentropy')
+    
+    # 训练参数
+    batch_count = len(train_data) // batch_size
+    
+    # 训练循环
     for epoch in range(epochs):
-        for batch_start in range(0, num_samples, batch_size):
-            current_batch_size = min(batch_size, num_samples - batch_start)
-
-            X_real = train_data[batch_start: batch_start + current_batch_size].astype(np.float32)
-            M_real = real_mask[batch_start: batch_start + current_batch_size].astype(np.float32)
-
-            # =========== 构造额外的 artificial_mask ===========
-            # 只在 M_real=1 的地方才可能挖掉
-            rnd_mat = np.random.rand(current_batch_size, window_size, input_dim)
-            artificial_mask = ((rnd_mat > missing_rate) & (M_real == 1)).astype(np.float32)
-
-            # =========== 融合 ===========
-            M_train = (M_real * artificial_mask).astype(np.float32)
-            # (1=保留, 0=缺失)
-
-            # =========== 构造 X_partial ===========
-            X_partial = M_train * X_real + (1 - M_train) * fill_value
-
-            # =========== 生成器输入 ===========
-            G_in = np.concatenate([X_partial, M_train], axis=2)
-
-            # =========== 生成器输出 & 融合 ===========
-            X_gen = generator.predict(G_in)
-            X_fake = M_train * X_partial + (1 - M_train) * X_gen
-
-            # =========== 判别器输入 ===========
-            fake_input = np.concatenate([X_fake, M_train], axis=2)
-            # 真数据: 用 (X_real, ???)
-            #  - 若你想假设真实数据在训练阶段是完整: (X_real, 1阵)
-            #  - 或者 (X_real, M_real)，让判别器也知道真实缺失
-            #   => 如果 M_real 里也有 0, 说明那些位置是不可对比
-            real_input = np.concatenate([X_real, M_real], axis=2)
-
-            # =========== 判别器标签 ===========
-            real_labels = np.ones((current_batch_size, 1), dtype=np.float32)
-            fake_labels = np.zeros((current_batch_size, 1), dtype=np.float32)
-
+        d_losses = []
+        g_losses = []
+        
+        for batch in range(batch_count):
+            # 获取批次数据
+            idx = np.random.randint(0, len(train_data), batch_size)
+            real_batch = train_data[idx]
+            mask_batch = real_mask[idx]
+            
+            # 创建噪声数据
+            noise = np.random.normal(0, 1, (batch_size, real_batch.shape[1], input_dim))
+            
+            # 生成假数据
+            gen_data = generator.predict([noise, mask_batch])
+            
             # 训练判别器
-            d_loss_real = discriminator.train_on_batch(real_input, real_labels)
-            d_loss_fake = discriminator.train_on_batch(fake_input, fake_labels)
+            d_loss_real = discriminator.train_on_batch(
+                [real_batch, mask_batch],
+                np.ones((batch_size, 1))
+            )
+            d_loss_fake = discriminator.train_on_batch(
+                [gen_data, mask_batch],
+                np.zeros((batch_size, 1))
+            )
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
+            
             # 训练生成器
-            # 让 fake_input 被判别器误判为真
-            G_in = np.concatenate([X_partial, M_train], axis=2)
-            g_loss = gan.train_on_batch(G_in, real_labels)
-
-        print(f"[Epoch {epoch + 1}/{epochs}] D Loss: {d_loss[0]:.4f}, G Loss: {g_loss:.4f}")
-
+            g_loss = gan.train_on_batch(
+                [noise, mask_batch],
+                np.ones((batch_size, 1))
+            )
+            
+            d_losses.append(d_loss[0])
+            g_losses.append(g_loss)
+        
+        # 打印训练进度
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1}/{epochs}")
+            print(f"D Loss: {np.mean(d_losses):.4f}")
+            print(f"G Loss: {np.mean(g_losses):.4f}")
+    
     return generator, discriminator, gan
 
-
-def Func_Process_Inter_tGAN_Multimodal(extend_train_path,extend_test_path, extend_val_path, tgan_model_path=None):
-    """
-    使用多模态 GAN 模型填补缺失数据。
-
-    输入：
-    - extend_test_path (str): 测试数据路径。
-    - extend_val_path (str): 验证数据路径。
-    - gan_model_path (str): GAN 模型路径（可选，如果提供则加载预训练模型）。
-
-    输出：
-    - Excel 文件，包含 GANs 的预测结果和误差分析。
-    """
+def Func_Process_Inter_tGAN_Multimodal(extend_train_path, extend_test_path, extend_val_path, tgan_model_path=None):
     time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
-    output_path = f'E:/BaiduSyncdisk/QZZ/data_generation/output/GAN_Multimodal_{time_str}'
+    output_path = f'E:/BaiduSyncdisk/QZZ/data_generation/output/tGAN_Multimodal_{time_str}'
     os.makedirs(output_path, exist_ok=True)
 
-    # 特征列
-    feature_columns = ['gender_values', 'age_values', 'iop_od_values', 'iop_os_values', 'cdr_od_values',
-                       'cdr_os_values', 'md_od_values', 'md_os_values', 'rnfl_od_values', 'rnfl_os_values',
-                       'period_values']
-
-    # 滑动窗口参数
-    window_size = 7  # 每个时间序列的长度为7
-    stride = 1  # 每次滑动1步
+    # 简化特征列
+    feature_columns = ['gender_values', 'age_values', 'iop_values', 'period_values']
     FILL_VALUE = 666
-    # 创建一个空列表，用于存储用户数据
-    tGAN_all_data = []  # 存储未标准化的用户数据
-    missing_mask = []   # 存储缺失值掩码
-
-    # 如果有模型路径，则加载模型，否则构建一个新模型
-    tgan_model_path = None
+    window_size = 4
+    stride = 1
+    
+    # 存储处理后的数据
+    tGAN_all_data = []
+    tgan_model_path = r'E:\BaiduSyncdisk\QZZ\data_generation\output\tGAN_Multimodal_20250206_1740'
     if tgan_model_path:
-        generator = load_model(tgan_model_path)
+        generator = load_model(os.path.join(tgan_model_path, 'tGAN_inter_model.keras'))
+        norm_params = np.load(os.path.join(tgan_model_path, 'normalization_params.npz'))
     else:
-        generator, discriminator, gan = Func_build_conditional_tgan_model(input_dim=len(feature_columns),fill_val=FILL_VALUE)
-
-        # 读取每个用户的数据（每个文件代表一个用户）
+        generator, discriminator, gan = Func_build_conditional_tgan_model(input_dim=len(feature_columns),
+            fill_val=FILL_VALUE
+        )
+        
+        
+        # 处理训练数据
         for filename in os.listdir(extend_train_path):
             if filename.startswith('patient_') and filename.endswith('.xlsx'):
                 file_path = os.path.join(extend_train_path, filename)
                 try:
-                    # 读取 Excel 文件
+                    # 加载数据
                     data_extend = Func_Dataloader_single(file_path)
-
-                    # 提取每个用户的多模态特征
-                    data_Process_Inter_tGAN_single = {}
-                    for feature in feature_columns:
-                        data_Process_Inter_tGAN_single[feature] = data_extend.__getattribute__(feature)
-
-                    # 转换为DataFrame
-                    user_df = pd.DataFrame(data_Process_Inter_tGAN_single)
-
-                    # 获取用户的缺失数据掩码（True表示缺失，False表示有数据）
-                    missing_mask_current = user_df.isna().values
-                    missing_mask.append(missing_mask_current)
-
-                    # 用 FILL_VALUE 填充 NaN
-
-                    user_df_filled = user_df.fillna(FILL_VALUE)
-
-                    # 如果用户的数据少于7条，则进行填充
-                    user_data_array = user_df_filled.values
-                    num_timesteps = user_data_array.shape[0]
-
-                    if num_timesteps < window_size:
-                        # 填充数据，使其长度为7
-                        padding_size = window_size - num_timesteps
-                        padded_user_data_array = np.pad(
-                            user_data_array,
-                            ((padding_size, 0), (0, 0)),  # 前填充
-                            mode='constant',
-                            constant_values=FILL_VALUE  # 使用 FILL_VALUE 填充
-                        )
-                        user_data_array = padded_user_data_array
-                        num_timesteps = window_size  # 现在是7条数据
-
-                    # 使用滑动窗口切割大于7条的数据
-                    temp_user_data = []
-                    for start_idx in range(0, num_timesteps - window_size + 1, stride):
-                        # 截取固定长度的时间序列
-                        window_data = user_data_array[start_idx:start_idx + window_size]
-                        temp_user_data.append(window_data)
-
-                    # 将处理后的数据添加到最终的列表中
-                    tGAN_all_data.extend(temp_user_data)
-
+                    
+                    # 合并左右眼数据
+                    combined_data = []
+                    for eye in ['od', 'os']:
+                        df = pd.DataFrame({
+                            'gender_values': data_extend.gender_values,
+                            'age_values': data_extend.age_values,
+                            'iop_values': getattr(data_extend, f'iop_{eye}_values'),
+                            'period_values': data_extend.period_values
+                        })
+                        # 前向填充性别和时间间隔
+                        df['gender_values'] = df['gender_values'].ffill()
+                        df['period_values'] = df['period_values'].ffill()
+                        combined_data.append(df)
+                    
+                    # 合并数据
+                    patient_data = pd.concat(combined_data, ignore_index=True)
+                    
+                    # 创建滑动窗口序列
+                    for i in range(0, len(patient_data) - window_size + 1, stride):
+                        window = patient_data.iloc[i:i+window_size][feature_columns].values
+                        if not np.all(np.isnan(window)):  # 排除全是NaN的窗口
+                            tGAN_all_data.append(window)
+                            
                 except Exception as e:
-                    print(f"处理文件 {filename} 时出错: {e}")
-
-        # 将所有用户的处理数据合并成三维数组
-        tGAN_all_data = np.array(tGAN_all_data)  # 形状 (n_samples, window_size, n_features)
-
-        # 转为三维数组 (n_samples, window_size, n_features)
-        tGAN_all_data = np.array(tGAN_all_data, dtype=float)
-
-        missing_mask_3d = (tGAN_all_data == FILL_VALUE)  # shape: (n_samples, window_size, n_features), dtype=bool
-        real_mask_3d = ~missing_mask_3d  # 把缺失取反 => 有值则 True
-        real_mask_3d = real_mask_3d.astype(np.float32)
-
-        # =============== 以下为「列级标准化」的实现示例 ===============
-
-        # 1) 获取数据的整体维度
-        n_samples, time_steps, n_features = tGAN_all_data.shape
-
-        # 2) 先准备一个副本，以便存放标准化后的结果
-        tGAN_all_data_normalized = tGAN_all_data.copy()  # shape 与 tGAN_all_data相同
-
-        # 3) 分列(特征)计算均值和标准差，只基于非填充值
-        means = np.zeros(n_features, dtype=float)
-        stds  = np.zeros(n_features, dtype=float)
-
-        for f in range(n_features):
-            # 取出第 f 列特征在所有 (样本, 时间步) 上的值，排除 FILL_VALUE
-            valid_values = tGAN_all_data[:, :, f][tGAN_all_data[:, :, f] != FILL_VALUE]
-            if len(valid_values) == 0:
-                # 如果这个特征在所有位置都是 FILL_VALUE，那就没法标准化，指定一个默认值
-                means[f] = 0.0
-                stds[f] = 1.0
-            else:
-                means[f] = valid_values.mean()
-                std_dev  = valid_values.std()
-                # 避免除0
-                stds[f] = std_dev if std_dev > 1e-12 else 1e-12
-
-        # 4) 应用标准化：对每个特征的有效值做 (x - mean) / std
-        for i in range(n_samples):
-            for j in range(time_steps):
-                for f in range(n_features):
-                    if tGAN_all_data_normalized[i, j, f] != FILL_VALUE:
-                        tGAN_all_data_normalized[i, j, f] = (
-                            (tGAN_all_data_normalized[i, j, f] - means[f]) / stds[f]
-                        )
-                    else:
-                        # 保留填充值不变，以便后续 Masking
-                        tGAN_all_data_normalized[i, j, f] = FILL_VALUE
-
-        # =============== 列级标准化到此结束 ====================
-
-        # missing_mask 里 True 表示缺失, False 表示有值
-        # 我们要把它转成 real_mask=1 表示有值, 0 表示缺失
-        real_mask_current = (~missing_mask_current).astype(np.float32)
-
-        # 填充完后，把 real_mask 做同样的滑窗操作...
-        temp_mask_data = []
-        for start_idx in range(0, num_timesteps - window_size + 1, stride):
-            window_mask = real_mask_current[start_idx: start_idx + window_size]
-            temp_mask_data.append(window_mask)
-
-        # 训练 GANs
+                    print(f"处理训练文件 {filename} 时出错: {e}")
+                    traceback.print_exc()
+        
+        # 转换为numpy数组
+        tGAN_all_data = np.array(tGAN_all_data)
+        
+        # 创建缺失值掩码
+        missing_mask = (tGAN_all_data == FILL_VALUE) | np.isnan(tGAN_all_data)
+        real_mask = ~missing_mask
+        
+        # 标准化数据
+        means = np.nanmean(np.where(real_mask, tGAN_all_data, np.nan), axis=(0,1))
+        stds = np.nanstd(np.where(real_mask, tGAN_all_data, np.nan), axis=(0,1))
+        normalized_data = (tGAN_all_data - means) / stds
+        normalized_data = np.nan_to_num(normalized_data, nan=0)
+        
+        # 训练模型
         generator, discriminator, gan = Func_train_tgan_conditional(
             generator, discriminator, gan,
-            tGAN_all_data_normalized, real_mask=real_mask_3d,input_dim=len(feature_columns),
+            normalized_data, real_mask=real_mask.astype(np.float32),
+            input_dim=len(feature_columns),
             batch_size=16,
             epochs=100,
-            missing_rate=0.3,
+            missing_rate=0.2,
             fill_value=FILL_VALUE
         )
-
-        # 保存模型
-        generator.save(output_path + '/tGAN_inter_model.keras')
-
-    # ##预测部分
-
+        
+        # 保存模型和标准化参数
+        generator.save(os.path.join(output_path, 'tGAN_inter_model.keras'))
+        np.savez(os.path.join(output_path, 'normalization_params.npz'), 
+                 means=means, stds=stds)
+    
+    # 处理测试数据
+    means, stds = norm_params['means'], norm_params['stds']
     for filename in os.listdir(extend_test_path):
         if filename.startswith('patient_') and filename.endswith('.xlsx'):
-            file_path_test = os.path.join(extend_test_path, filename)
-            file_path_val = os.path.join(extend_val_path, filename)
+            file_path = os.path.join(extend_test_path, filename)
             try:
-                # 加载测试和验证数据
-                data_extend_test = Func_Dataloader_single(file_path_test)
-                data_extend_test_ori = copy.copy(data_extend_test)
-                data_extend_val = Func_Dataloader_single(file_path_val)
+                data_test = Func_Dataloader_single(file_path)
+                
+                for eye in ['od', 'os']:
+                    test_data = pd.DataFrame({
+                        'gender_values': data_test.gender_values,
+                        'age_values': data_test.age_values,
+                        'iop_values': getattr(data_test, f'iop_{eye}_values'),
+                        'period_values': data_test.period_values
+                    })
+                    
+                    # 前向填充固定值
+                    test_data['gender_values'] = test_data['gender_values'].ffill()
+                    test_data['period_values'] = test_data['period_values'].ffill()
+                    
+                    # 获取原始IOP序列长度
+                    original_length = len(getattr(data_test, f'iop_{eye}_values'))
+                    
+                    # 创建滑动窗口序列
+                    test_sequences = []
+                    test_masks = []
+                    
+                    for i in range(0, len(test_data) - window_size + 1, stride):
+                        window = test_data.iloc[i:i+window_size].values
+                        mask = ~np.isnan(window)
+                        test_sequences.append(window)
+                        test_masks.append(mask)
+                    
+                    test_sequences = np.array(test_sequences)
+                    test_masks = np.array(test_masks).astype(np.float32)
+                    
+                    # 标准化和生成
+                    test_normalized = (test_sequences - means) / stds
+                    test_normalized = np.nan_to_num(test_normalized, nan=0)
+                    generated = generator.predict([test_normalized, test_masks])
+                    
+                    # 反标准化
+                    filled_values = generated * stds[2] + means[2]  # 只取iop值
+                    
+                    # 创建结果数组
+                    filled_series = np.zeros(original_length)
+                    filled_series[:] = np.nan
+                    
+                    # 填充缺失值
+                    iop_col = f'iop_{eye}_values'
+                    original_values = getattr(data_test, iop_col)
+                    mask = np.isnan(original_values)
+                    
+                    # 对每个窗口的预测值进行处理
+                    for i in range(len(test_sequences)):
+                        window_start = i
+                        window_end = i + window_size
+                        # 只在缺失位置填充预测值
+                        for j in range(window_size):
+                            if mask[window_start + j]:
+                                filled_series[window_start + j] = filled_values[i][j]
+                    
+                    # 更新数据
+                    # 只在原始值为nan的位置使用填充值
+                    final_values = np.where(mask, 
+                                        filled_series, 
+                                        original_values)
+                    setattr(data_test, iop_col, final_values)
+                    
+                # 保存填充后的数据
+                output_file = os.path.join(output_path, f'filled_{filename}')
+                
+                
+                data_test.to_excel(output_file, index=False)
+                print(f"已保存填充后的文件: {output_file}")
+                
+            except Exception as e:
+                print(f"处理测试文件 {filename} 时出错: {e}")
+                traceback.print_exc()
+
+def Func_Inter_iopcdr_LSTM(extend_path,extend_output_path):
+    """
+    功能：
+    使用LSTM模型处理数据并预测缺失值。
+
+    输入：
+    - extend_path: 训练数据路径
+    - output_path: 输出数据路径
+    """
+    time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
+    output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output\LSTM_iopcdr' + '/' + time_str
+    model_path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\code\model'
+    results_Process_Inter_LSTM = result()
+    data_Process_Inter_LSTM_all = []
 
 
-                ###缺失部分
-                test_column = 'iop_os_values'
+    iop_model = load_model(model_path + '\lstm_inter_model.keras')
+    iop_scaler = joblib.load(model_path + '\lstm_inter_cdr_scaler.pkl')
+    
+    cdr_model = load_model(model_path + '\lstm_inter_cdr_model.keras')
+    cdr_scaler = joblib.load(model_path + '\lstm_inter_cdr_scaler.pkl')
 
-                # 提取多模态特征
-                data_Process_Inter_tGAN_single = {}
-                for feature in feature_columns:
-                    data_Process_Inter_tGAN_single[feature] = data_extend_test.__getattribute__(feature).replace(666,
-                                                                                                                np.nan)
-
-                # 转换为 DataFrame
-                test_data = pd.DataFrame(data_Process_Inter_tGAN_single)
-
-                # 标准化测试数据
-                test_data_normalized = pd.DataFrame(
-                    scaler.fit_transform(test_data),
-                    columns=feature_columns
-                )
-
-                # 生成缺失值掩码
-                missing_mask = test_data.isna()
-
-                # 用生成器生成缺失值
-                noise = np.random.normal(0, 1, size=(missing_mask[test_column].sum(), len(feature_columns)))
-                generated_values = generator.predict(noise)
-
-                # 检查生成器输出的形状
-                assert generated_values.shape[0] == missing_mask[test_column].sum(), \
-                    f"生成器生成的数据数量 ({generated_values.shape[0]}) 与缺失值数量 ({missing_mask[test_column].sum()}) 不一致"
-
-                # 填补缺失值
-                filled_data_normalized = test_data_normalized.copy()
-
-                # 将生成器输出展开为一维数组
-                generated_values = generated_values.flatten()
-
-                # 按缺失值掩码逐行填充缺失值
-                missing_indices = missing_mask.index[missing_mask[test_column]].tolist()
-                for idx, value in zip(missing_indices, generated_values):
-                    filled_data_normalized.loc[idx, test_column] = value
-
-                # 反标准化结果
-                filled_data = pd.DataFrame(
-                    scaler.inverse_transform(filled_data_normalized),
-                    columns=feature_columns
-                )
-
-                # 分析误差
-                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(
-                    data_extend_test_ori.iop_os_values,
-                    filled_data[test_column],
-                    data_extend_val.iop_os_values
-                )
-                results_Process_Inter_tGAN.iop_os.predicted_list.append(predicted_value)
-                results_Process_Inter_tGAN.iop_os.true_list.append(true_value)
-
+    for filename in os.listdir(extend_path):
+        # 确保只处理patient_开头的Excel文件
+        if filename.startswith('patient_') and filename.endswith('.xlsx'):
+            file_path = os.path.join(extend_path, filename)
+            try:
+                # 读取原始Excel文件
+                df = pd.read_excel(file_path)
+                
+                # 获取需要填充的列
+                iop_cols = ['iop_od_values', 'iop_os_values']
+                cdr_cols = ['cdr_od_values', 'cdr_os_values']
+                
+                # 复制原始数据用于填充
+                df_filled = df.copy()
+                
+                # 对IOP数据进行填充
+                for col in iop_cols:
+                    # 找出需要填充的位置(值为666)
+                    mask = pd.isna(df[col])
+                    if mask.any():
+                        # 准备数据
+                        data = pd.DataFrame({
+                            'age_values': df['age_values'],
+                            'iop_values': df[col]
+                        })
+                        
+                        # 标准化数据
+                        data['age_values'] = cdr_scaler.transform(data['age_values'].values.reshape(-1, 1))
+                        data['iop_values'] = iop_scaler.transform(data['iop_values'].values.reshape(-1, 1))
+                        
+                        # 预测填充
+                        window_size = 3
+                        filled_data = Func_LSTM_predict_missing_values(iop_model, data, window_size, iop_scaler, 'iop_values')
+                        
+                        # 反标准化
+                        filled_values = Func_reverse_standardization(iop_scaler, filled_data['iop_values'].values)
+                        filled_values[filled_values < 8] = 8
+                        
+                        # 只在666的位置进行填充
+                        df_filled.loc[mask, col] = filled_values[mask]
+                
+                # 对CDR数据进行填充
+                for col in cdr_cols:
+                    # 找出需要填充的位置(值为nan)
+                    mask = pd.isna(df[col]) 
+                    if mask.any():
+                        # 准备数据
+                        data = pd.DataFrame({
+                            'age_values': df['age_values'],
+                            'cdr_values': df[col]
+                        })
+                        
+                        # 标准化数据
+                        data['age_values'] = cdr_scaler.transform(data['age_values'].values.reshape(-1, 1))
+                        data['cdr_values'] = cdr_scaler.transform(data['cdr_values'].values.reshape(-1, 1))
+                        
+                        # 预测填充
+                        window_size = 3
+                        filled_data = Func_LSTM_predict_missing_values(cdr_model, data, window_size, cdr_scaler, 'cdr_values')
+                        
+                        # 反标准化
+                        filled_values = Func_reverse_standardization(cdr_scaler, filled_data['cdr_values'].values)
+                        filled_values[filled_values < 0.2] = 0.2
+                        
+                        # 只在nan的位置进行填充
+                        df_filled.loc[mask, col] = filled_values[mask]
+                
+                # 保存填充后的文件
+                os.makedirs(output_path, exist_ok=True)
+                output_file = os.path.join(output_path, f'{filename}')
+                df_filled.to_excel(output_file, index=False)
+                print(f"已保存填充后的文件: {output_file}")
 
             except Exception as e:
                 print(f"处理文件 {filename} 时出错: {e}")
                 traceback.print_exc()
-
-
-    # 汇总结果并保存为 Excel
-
-    results_Process_Inter_tGAN.iop_os.predicted_val = pd.concat(
-            results_Process_Inter_tGAN.iop_os.predicted_list, ignore_index=True)
-    results_Process_Inter_tGAN.iop_os.true_val = pd.concat(
-            results_Process_Inter_tGAN.iop_os.true_list, ignore_index=True)
-
-    mse, mae, accuracy = Func_Analyse_Evaluate(
-            results_Process_Inter_tGAN.iop_os.predicted_val,
-            results_Process_Inter_tGAN.iop_os.true_val
-        )
-
-    # 保存结果
-    df = pd.DataFrame({
-            'predicted_val': results_Process_Inter_tGAN.iop_os.predicted_val,
-            'true_val': results_Process_Inter_tGAN.iop_os.true_val,
-            'mse': mse,
-            'mae': mae,
-            'Acc': accuracy
-        })
-    df.to_excel(output_path + f'/Analyse_tGAN_process.xlsx', index=False, header=True)
-    print(mse,mae,accuracy)
 
 
 def Func_Process_Inter_LSTM(extend_path,extend_test_path,extend_val_path):
@@ -862,141 +953,146 @@ def Func_Process_Inter_LSTM(extend_path,extend_test_path,extend_val_path):
     # 创建输出图表的文件夹（如果不存在）
 
     time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
-    output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output' + '/' + time_str
-
+    output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output\LSTM_iop' + '/' + time_str
+    model_path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\code\model'
     results_Process_Inter_LSTM = result()
     data_Process_Inter_LSTM_all = []
 
     os.makedirs(output_path, exist_ok=True)
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+    if os.path.exists(model_path+ '\lstm_inter_cdr_model.keras'):
+        # os.makedirs(model_path)
+        model = load_model(model_path + '\lstm_inter_cdr_model.keras')
+        scaler = joblib.load(model_path + '\lstm_inter_cdr_scaler.pkl')
+    else:
+        # 遍历文件夹中的所有Excel文件
+        for filename in os.listdir(extend_path):
+            # 确保只处理patient_开头的Excel文件
+            if filename.startswith('patient_') and filename.endswith('.xlsx'):
+                # 完整文件路径
+                file_path1 = os.path.join(extend_path, filename)
+                # file_path2 = os.path.join(extend_empty_path, filename)
+                try:
+                    # 读取Excel文件
 
-    # 遍历文件夹中的所有Excel文件
-    for filename in os.listdir(extend_path):
-        # 确保只处理patient_开头的Excel文件
-        if filename.startswith('patient_') and filename.endswith('.xlsx'):
-            # 完整文件路径
-            file_path1 = os.path.join(extend_path, filename)
-            # file_path2 = os.path.join(extend_empty_path, filename)
-            try:
-                # 读取Excel文件
-
-                data_extend = Func_Dataloader_single(file_path1)
-
-
-                data_Process_Inter_LSTM_single = {}
-                data_Process_Inter_LSTM_single['ID'] = data_extend.ID * 10 + 1              ##左眼
-                data_Process_Inter_LSTM_single['age_values'] = data_extend.age_values
-                data_Process_Inter_LSTM_single['iop_values'] = data_extend.iop_od_values
-                data_Process_Inter_LSTM_all.append(pd.DataFrame(data_Process_Inter_LSTM_single))
-
-                data_Process_Inter_LSTM_single = {}
-                data_Process_Inter_LSTM_single['ID'] = data_extend.ID * 10 + 2              ##右眼
-                data_Process_Inter_LSTM_single['age_values'] = data_extend.age_values
-                data_Process_Inter_LSTM_single['iop_values'] = data_extend.iop_os_values
-                data_Process_Inter_LSTM_all.append(pd.DataFrame(data_Process_Inter_LSTM_single))
+                    data_extend = Func_Dataloader_single(file_path1)
 
 
+                    data_Process_Inter_LSTM_single = {}
+                    data_Process_Inter_LSTM_single['ID'] = data_extend.ID * 10 + 1              ##左眼
+                    data_Process_Inter_LSTM_single['age_values'] = data_extend.age_values
+                    data_Process_Inter_LSTM_single['cdr_values'] = data_extend.cdr_od_values
+                    data_Process_Inter_LSTM_all.append(pd.DataFrame(data_Process_Inter_LSTM_single))
 
-            except Exception as e:
-                print(f"处理文件 {filename} 时出错: {e}")
+                    data_Process_Inter_LSTM_single = {}
+                    data_Process_Inter_LSTM_single['ID'] = data_extend.ID * 10 + 2              ##右眼
+                    data_Process_Inter_LSTM_single['age_values'] = data_extend.age_values
+                    data_Process_Inter_LSTM_single['cdr_values'] = data_extend.cdr_os_values
+                    data_Process_Inter_LSTM_all.append(pd.DataFrame(data_Process_Inter_LSTM_single))
 
 
-    # model = load_model(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\code\lstm_inter_model.keras')
-    LSTM_all_data = pd.concat(data_Process_Inter_LSTM_all, axis=0, ignore_index=True)
-    #标准化
-    scaler = StandardScaler()
-    # 对非缺失值进行标准化
-    LSTM_all_data['age_values'] = scaler.fit_transform(LSTM_all_data['age_values'].values.reshape(-1, 1))
-    LSTM_all_data['iop_values'] = scaler.fit_transform(LSTM_all_data['iop_values'].values.reshape(-1, 1))
+
+                except Exception as e:
+                    print(f"处理文件 {filename} 时出错: {e}")
 
 
-    # 切割
-    # 切片数据
-    window_size = 3
-    X, y = Func_preprocess_and_slice_data(LSTM_all_data, window_size)
+        # model = load_model(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\code\lstm_inter_model.keras')
+        LSTM_all_data = pd.concat(data_Process_Inter_LSTM_all, axis=0, ignore_index=True)
+        #标准化
+        scaler = StandardScaler()
+        # 对非缺失值进行标准化
+        LSTM_all_data['age_values'] = scaler.fit_transform(LSTM_all_data['age_values'].values.reshape(-1, 1))
+        LSTM_all_data['cdr_values'] = scaler.fit_transform(LSTM_all_data['cdr_values'].values.reshape(-1, 1))
 
-    # 确保输入数据为 LSTM 格式 (样本数, 时间步长, 特征数)
-    X = X.reshape((X.shape[0], X.shape[1], 2))  # 2个特征 (age 和 iop_values)
 
-    # 创建模型
-    model = Func_build_lstm_model(input_shape=(window_size, 2))
+        # 切割
+        # 切片数据
+        window_size = 3
+        X, y = Func_preprocess_and_slice_data(LSTM_all_data, window_size)
 
-    # 训练模型
-    model.fit(X, y, epochs=50, batch_size=32, validation_split=0.2, verbose=2)
-    #
-    model.save(output_path +'\lstm_inter_model.keras')  # 默认保存模型和权重
+        # 确保输入数据为 LSTM 格式 (样本数, 时间步长, 特征数)
+        X = X.reshape((X.shape[0], X.shape[1], 2))  # 2个特征 (age 和 iop_values)
 
+        # 创建模型
+        model = Func_build_lstm_model(input_shape=(window_size, 2))
+
+        # 训练模型
+        model.fit(X, y, epochs=100, batch_size=32, validation_split=0.2, verbose=2)
+        #
+        
+        model.save(output_path +'\lstm_inter_cdr_model.keras')  # 默认保存模型和权重
+        joblib.dump(scaler, output_path +'\lstm_inter_cdr_scaler.pkl')
 
 
     data_Process_Inter_LSTM_test = []
-
 
 ##读取测试数据，并且把666替换为nan
     for filename in os.listdir(extend_test_path):
         # 确保只处理patient_开头的Excel文件
         if filename.startswith('patient_') and filename.endswith('.xlsx'):
             # 完整文件路径
-            file_path2 = os.path.join(extend_test_path, filename)
+            # file_path2 = os.path.join(extend_test_path, filename)
             file_path3 = os.path.join(extend_val_path, filename)
             try:
                 # 读取Excel文件
-                data_extend_test = Func_Dataloader_single(file_path2)
-                data_extend_test_ori = copy.copy(data_extend_test)
+                # data_extend_test = Func_Dataloader_single(file_path2)
+                # data_extend_test_ori = copy.copy(data_extend_test)
                 data_extend_val = Func_Dataloader_single(file_path3)
+                
+                data_extend_test = Func_create_missing_data(copy.copy(data_extend_val))
+                data_extend_test_ori = copy.copy(data_extend_test)
 
                 data_Process_Inter_LSTM_single = pd.DataFrame({
                     'ID': data_extend_test.ID,  # 左眼
                     'age_values': data_extend_test.age_values,
-                    'iop_values': data_extend_test.iop_od_values.replace(666, np.nan)  # 替换 666 为 np.nan
+                    'cdr_values': data_extend_test.cdr_od_values.replace(666, np.nan)  # 替换 666 为 np.nan
                 })
 
                 LSTM_test_data = data_Process_Inter_LSTM_single.copy()
                 LSTM_test_data['age_values'] = scaler.fit_transform(LSTM_test_data['age_values'].values.reshape(-1, 1))
-                LSTM_test_data['iop_values'] = scaler.fit_transform(LSTM_test_data['iop_values'].values.reshape(-1, 1))
+                LSTM_test_data['cdr_values'] = scaler.fit_transform(LSTM_test_data['cdr_values'].values.reshape(-1, 1))
                 # 预测缺失值
                 window_size = 3
                 filled_data = Func_LSTM_predict_missing_values(model, LSTM_test_data, window_size, scaler)
                 # 3. 填补缺失值后，对结果进行反标准化
                 # 将填补后的iop_values列进行反标准化
-                filled_data['iop_values'] = Func_reverse_standardization(scaler, filled_data['iop_values'].values)
+                filled_data['cdr_values'] = Func_reverse_standardization(scaler, filled_data['cdr_values'].values)
 
                 # 4. 如果需要，原始的age_values也可以进行反标准化（通常可以直接使用原始的age_values，因为它没有缺失）
                 filled_data['age_values'] = data_Process_Inter_LSTM_single['age_values']
 
-                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(data_extend_test_ori.iop_od_values,
-                                                                                     filled_data['iop_values'],
-                                                                                     data_extend_val.iop_od_values)
-                results_Process_Inter_LSTM.iop_od.predicted_list.append(predicted_value)
-                results_Process_Inter_LSTM.iop_od.true_list.append(true_value)
+                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(data_extend_test_ori.cdr_od_values,
+                                                                                     filled_data['cdr_values'],
+                                                                                     data_extend_val.cdr_od_values)
+                results_Process_Inter_LSTM.cdr_od.predicted_list.append(predicted_value)
+                results_Process_Inter_LSTM.cdr_od.true_list.append(true_value)
 
 
 
                 data_Process_Inter_LSTM_single = pd.DataFrame({
                     'ID': data_extend_test.ID * 10,  # 右眼
                     'age_values': data_extend_test.age_values,
-                    'iop_values': data_extend_test.iop_os_values.replace(666, np.nan)  # 替换 666 为 np.nan
+                    'cdr_values': data_extend_test.cdr_os_values.replace(666, np.nan)  # 替换 666 为 np.nan
                 })
 
 
 
                 LSTM_test_data = data_Process_Inter_LSTM_single.copy()
-                LSTM_test_data['age_values'] = scaler.fit_transform(LSTM_test_data['age_values'].values.reshape(-1, 1))
-                LSTM_test_data['iop_values'] = scaler.fit_transform(LSTM_test_data['iop_values'].values.reshape(-1, 1))
+                LSTM_test_data['age_values'] = scaler.transform(LSTM_test_data['age_values'].values.reshape(-1, 1))
+                LSTM_test_data['cdr_values'] = scaler.transform(LSTM_test_data['cdr_values'].values.reshape(-1, 1))
                 # 预测缺失值
                 filled_data = Func_LSTM_predict_missing_values(model, LSTM_test_data, window_size, scaler)
                 # 3. 填补缺失值后，对结果进行反标准化
                 # 将填补后的iop_values列进行反标准化
-                filled_data['iop_values'] = Func_reverse_standardization(scaler, filled_data['iop_values'].values)
+                filled_data['cdr_values'] = Func_reverse_standardization(scaler, filled_data['cdr_values'].values)
 
                 # 4. 如果需要，原始的age_values也可以进行反标准化（通常可以直接使用原始的age_values，因为它没有缺失）
                 filled_data['age_values'] = data_Process_Inter_LSTM_single['age_values']
 
-                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(data_extend_test_ori.iop_os_values,
-                                                                                     filled_data['iop_values'],
-                                                                                     data_extend_val.iop_os_values)
-                results_Process_Inter_LSTM.iop_os.predicted_list.append(predicted_value)
-                results_Process_Inter_LSTM.iop_os.true_list.append(true_value)
+                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(data_extend_test_ori.cdr_os_values,
+                                                                                     filled_data['cdr_values'],
+                                                                                     data_extend_val.cdr_os_values)
+                results_Process_Inter_LSTM.cdr_os.predicted_list.append(predicted_value)
+                results_Process_Inter_LSTM.cdr_os.true_list.append(true_value)
 
             except Exception as e:
                 print(f"处理文件 {filename} 时出错: {e}")
@@ -1004,14 +1100,14 @@ def Func_Process_Inter_LSTM(extend_path,extend_test_path,extend_val_path):
 
 
 
-    results_Process_Inter_LSTM.iop_od.predicted_val = pd.concat(results_Process_Inter_LSTM.iop_od.predicted_list,ignore_index=True)
-    results_Process_Inter_LSTM.iop_od.true_val = pd.concat(results_Process_Inter_LSTM.iop_od.true_list, ignore_index=True)
-    mse,mae,accuracy = Func_Analyse_Evaluate(results_Process_Inter_LSTM.iop_od.predicted_val, results_Process_Inter_LSTM.iop_od.true_val)
+    results_Process_Inter_LSTM.cdr_od.predicted_val = pd.concat(results_Process_Inter_LSTM.cdr_od.predicted_list,ignore_index=True)
+    results_Process_Inter_LSTM.cdr_od.true_val = pd.concat(results_Process_Inter_LSTM.cdr_od.true_list, ignore_index=True)
+    mse,mae,accuracy = Func_Analyse_Evaluate(results_Process_Inter_LSTM.cdr_od.predicted_val, results_Process_Inter_LSTM.cdr_od.true_val)
 
     # 将 data_extend 转换为 DataFrame
     df = pd.DataFrame({
-        'predicted_val': results_Process_Inter_LSTM.iop_od.predicted_val,
-        'true_val': results_Process_Inter_LSTM.iop_od.true_val,
+        'predicted_val': results_Process_Inter_LSTM.cdr_od.predicted_val,
+        'true_val': results_Process_Inter_LSTM.cdr_od.true_val,
         'mse':mse,
         'mae':mae,
         'Acc':accuracy
@@ -1019,8 +1115,246 @@ def Func_Process_Inter_LSTM(extend_path,extend_test_path,extend_val_path):
     })
 
     # 输出成excel文件
-    df.to_excel(output_path + '/Analyse_data_extend_LSTM_process' + '.xlsx', index=False, header=True)
+    df.to_excel(output_path + '/Analyse_data_extend_cdr_LSTM_process' + '.xlsx', index=False, header=True)
 
+
+def Func_Build_Multi_LSTM_Model(input_shape, output_size):
+    """构建多输入多输出的 LSTM 模型"""
+    model = Sequential()
+    model.add(LSTM(64, return_sequences=True, input_shape=input_shape))
+    model.add(LSTM(64))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dense(output_size))  # 输出层大小根据目标数量调整
+    model.compile(optimizer='adam', loss='mse')
+    return model
+
+
+
+def Func_Process_Multi_Inter_LSTM(extend_path, extend_test_path, extend_val_path):
+    """
+    功能：
+    使用多输入多输出 LSTM 模型处理数据并预测缺失值。
+
+    输入：
+    - extend_path: 训练数据路径
+    - extend_test_path: 测试数据路径
+    - extend_val_path: 验证数据路径
+
+    输出：
+    - 保存预测结果和模型到指定路径
+    """
+    # 创建输出文件夹
+    time_str = datetime.now().strftime('%Y%m%d_%H%M%S') + '/'
+    output_path = r'E:\BaiduSyncdisk\QZZ\data_generation\output' + '/' + time_str
+    os.makedirs(output_path, exist_ok=True)
+
+    # 初始化结果存储
+    results_Process_Inter_LSTM = result()
+    data_Process_Inter_LSTM_all = []
+
+    # 遍历训练数据文件
+    for filename in os.listdir(extend_path):
+        if filename.startswith('patient_') and filename.endswith('.xlsx'):
+            file_path = os.path.join(extend_path, filename)
+            try:
+                data_extend = Func_Dataloader_single(file_path)
+
+                # ['age_values', 'diagnosis_values', 'iop_od_values', 'iop_os_values',
+                #  'cdr_od_values', 'cdr_os_values', 'md_od_values', 'md_os_values',
+                #  'rnfl_od_values', 'rnfl_os_values']
+
+                # 左眼数据
+                data_single = {
+                    'ID': data_extend.ID * 10 + 1,
+                    'gender_values':data_extend.gender_values,
+                    'age_values': data_extend.age_values,
+                    'iop_values': data_extend.iop_od_values,
+                    'cdr_values': data_extend.cdr_od_values,  # 假设杯盘比字段
+                    'md_values': data_extend.md_od_values,      # 假设视野字段
+                    'rnfl_values': data_extend.rnfl_od_values,     # 假设时间间隔字段
+                    'period_values':data_extend.period_values
+                }
+                data_Process_Inter_LSTM_all.append(pd.DataFrame(data_single))
+
+                # 右眼数据
+                data_single = {
+                    'ID': data_extend.ID * 10 + 2,
+                    'gender_values': data_extend.gender_values,
+                    'age_values': data_extend.age_values,
+                    'iop_values': data_extend.iop_os_values,
+                    'cdr_values': data_extend.cdr_os_values,  # 假设杯盘比字段
+                    'md_values': data_extend.md_os_values,      # 假设视野字段
+                    'rnfl_values': data_extend.rnfl_os_values,     # 假设时间间隔字段
+                    'period_values':data_extend.period_values
+                }
+                data_Process_Inter_LSTM_all.append(pd.DataFrame(data_single))
+
+            except Exception as e:
+                print(f"处理文件 {filename} 时出错: {e}")
+                traceback.print_exc()
+
+    # 合并所有数据
+    LSTM_all_data = pd.concat(data_Process_Inter_LSTM_all, axis=0, ignore_index=True)
+
+    # 标准化
+    scaler = StandardScaler()
+    features = ['gender_values','age_values', 'iop_values', 'cdr_values', 'md_values','rnfl_values','period_values']
+    targets= ['iop_values', 'cdr_values', 'md_values','rnfl_values']
+    for feature in features:
+        LSTM_all_data[feature] = scaler.fit_transform(LSTM_all_data[feature].values.reshape(-1, 1))
+    for target in targets:
+        LSTM_all_data[target] = scaler.fit_transform(LSTM_all_data[target].values.reshape(-1, 1))
+    # 数据切分
+    window_size = 3
+    X, y = Func_Multi_preprocess_and_slice_data(LSTM_all_data, window_size)
+    X = X.reshape((X.shape[0], X.shape[1], len(features) + len(targets)))
+
+    # 构建模型
+    model = Func_Build_Multi_LSTM_Model(input_shape=(window_size, len(features) + len(targets)), output_size=len(targets))
+
+    # 训练模型
+    model.fit(X, y, epochs=50, batch_size=32, validation_split=0.2, verbose=2)
+    model.save(output_path + 'lstm_multi_inter_model.keras')
+
+    def Func_LSTM_Multi_predict_missing_values(model, data, window_size, scaler):
+        """
+        功能：
+        使用多输入多输出 LSTM 模型预测缺失值。
+
+        输入：
+        - model: 训练好的 LSTM 模型。
+        - data (pd.DataFrame): 标准化后的测试数据。
+        - window_size (int): 时间窗口大小。
+        - scaler: 标准化器。
+
+        输出：
+        - filled_data (pd.DataFrame): 包含预测值的 DataFrame。
+        """
+        # 数据切分
+        X, _ = Func_preprocess_and_slice_data(data, window_size)
+        X = X.reshape((X.shape[0], X.shape[1], -1))
+
+        # 预测
+        predictions = model.predict(X)
+
+        # 反标准化
+        predictions = scaler.inverse_transform(predictions)
+
+        # 创建结果 DataFrame
+        filled_data = pd.DataFrame(predictions, columns=['iop_values', 'cdr_values', 'md_values', 'rnfl_values'])
+
+        return filled_data
+
+    # 测试数据处理
+    for filename in os.listdir(extend_test_path):
+        if filename.startswith('patient_') and filename.endswith('.xlsx'):
+            file_path_test = os.path.join(extend_test_path, filename)
+            file_path_val = os.path.join(extend_val_path, filename)
+            try:
+                data_test = Func_Dataloader_single(file_path_test)
+                data_test_ori = copy.copy(data_test)
+                data_val = Func_Dataloader_single(file_path_val)
+
+                # 左眼数据
+                test_data = {
+                    'ID': data_test.ID,
+                    'gender_values': data_extend.gender_values,
+                    'age_values': data_extend.age_values,
+                    'iop_values': data_extend.iop_od_values,
+                    'cdr_values': data_extend.cdr_od_values,  # 假设杯盘比字段
+                    'md_values': data_extend.md_od_values,      # 假设视野字段
+                    'rnfl_values': data_extend.rnfl_od_values,     # 假设时间间隔字段
+                    'period_values':data_extend.period_values
+                }
+                test_df = pd.DataFrame(test_data)
+
+                # 标准化
+                for feature in features:
+                    test_df[feature] = scaler.transform(test_df[feature].values.reshape(-1, 1))
+                for target in targets:
+                    test_df[target] = scaler.transform(test_df[target].values.reshape(-1, 1))
+
+                # 预测缺失值
+                filled_data = Func_LSTM_predict_missing_values(model, test_df, window_size, scaler)
+
+                # 反标准化
+                filled_data['iop_values'] = Func_reverse_standardization(scaler, filled_data['iop_values'].values)
+                filled_data['cdr_values'] = Func_reverse_standardization(scaler, filled_data['cdr_values'].values)
+                filled_data['md_values'] = Func_reverse_standardization(scaler, filled_data['md_values'].values)
+                filled_data['rnfl_values'] = Func_reverse_standardization(scaler, filled_data['rnfl_values'].values)
+
+                filled_data['gender_values'] = test_data['gender_values']
+                filled_data['age_values'] = test_data['age_values']
+                filled_data['period_values'] = test_data['period_values']
+                # 评估
+                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(
+                    data_test_ori.iop_od_values,
+                    filled_data['iop_values'],
+                    data_val.iop_od_values
+                )
+                results_Process_Inter_LSTM.iop_od['predicted_list'].append(predicted_value)
+                results_Process_Inter_LSTM.iop_od['true_list'].append(true_value)
+
+                # 右眼数据
+                test_data = {
+                    'ID': data_test.ID,
+                    'gender_values': data_extend.gender_values,
+                    'age_values': data_extend.age_values,
+                    'iop_values': data_extend.iop_os_values,
+                    'cdr_values': data_extend.cdr_os_values,  # 假设杯盘比字段
+                    'md_values': data_extend.md_os_values,      # 假设视野字段
+                    'rnfl_values': data_extend.rnfl_os_values,     # 假设时间间隔字段
+                    'period_values':data_extend.period_values
+                }
+                test_df = pd.DataFrame(test_data)
+
+                # 标准化
+                for feature in features:
+                    test_df[feature] = scaler.transform(test_df[feature].values.reshape(-1, 1))
+                for target in targets:
+                    test_df[target] = scaler.transform(test_df[target].values.reshape(-1, 1))
+
+                # 预测缺失值
+                filled_data = Func_LSTM_Multi_predict_missing_values(model, test_df, window_size, scaler)
+
+                # 反标准化
+                filled_data['iop_values'] = Func_reverse_standardization(scaler, filled_data['iop_values'].values)
+                filled_data['cdr_values'] = Func_reverse_standardization(scaler, filled_data['cdr_values'].values)
+                filled_data['md_values'] = Func_reverse_standardization(scaler, filled_data['md_values'].values)
+                filled_data['rnfl_values'] = Func_reverse_standardization(scaler, filled_data['rnfl_values'].values)
+
+                filled_data['gender_values'] = test_data['gender_values']
+                filled_data['age_values'] = test_data['age_values']
+                filled_data['period_values'] = test_data['period_values']
+
+                # 评估
+                mse, mae, predicted_value, true_value = Func_Analyse_Evaluate_Series(
+                    data_test_ori.iop_os_values,
+                    filled_data['iop_values'],
+                    data_val.iop_os_values
+                )
+                results_Process_Inter_LSTM.iop_os['predicted_list'].append(predicted_value)
+                results_Process_Inter_LSTM.iop_os['true_list'].append(true_value)
+
+            except Exception as e:
+                print(f"处理文件 {filename} 时出错: {e}")
+                traceback.print_exc()
+
+    # 保存结果
+    df_od = pd.DataFrame({
+        'predicted_val': results_Process_Inter_LSTM.iop_od['predicted_list'],
+        'true_val': results_Process_Inter_LSTM.iop_od['true_list']
+    })
+    df_os = pd.DataFrame({
+        'predicted_val': results_Process_Inter_LSTM.iop_os['predicted_list'],
+        'true_val': results_Process_Inter_LSTM.iop_os['true_list']
+    })
+
+    mse_od, mae_od, accuracy_od = Func_Analyse_Evaluate(df_od['predicted_val'], df_od['true_val'])
+    mse_os, mae_os, accuracy_os = Func_Analyse_Evaluate(df_os['predicted_val'], df_os['true_val'])
+
+    df_od.to_excel(output_path + '/Analyse_data_od.xlsx', index=False, header=True)
+    df_os.to_excel(output_path + '/Analyse_data_os.xlsx', index=False, header=True)
 
 
 
@@ -1032,7 +1366,7 @@ def Func_reverse_standardization(scaler, standardized_values):
     return standardized_values * scaler.scale_[0] + scaler.mean_[0]
 
 # 填补缺失值 (通过滑动窗口方式预测)
-def Func_LSTM_predict_missing_values(model, test_data, window_size,scaler):
+def Func_LSTM_predict_missing_values(model, test_data, window_size,scaler,value_name):
     """
     功能：
     使用LSTM模型预测数据中的缺失值。
@@ -1046,7 +1380,15 @@ def Func_LSTM_predict_missing_values(model, test_data, window_size,scaler):
     输出：
     - test_data (pd.DataFrame): 填补了缺失值的数据。
     """
-    iop_values = test_data['iop_values'].values
+    
+    if value_name == 'cdr_values':
+        fill_values = test_data['cdr_values'].values
+    elif value_name == 'iop_values':
+        fill_values = test_data['iop_values'].values
+    else:
+        print('value_name 输入错误')
+        return  
+
     age_values = test_data['age_values'].values
 
     # 将 666 替换为 NaN
@@ -1054,11 +1396,11 @@ def Func_LSTM_predict_missing_values(model, test_data, window_size,scaler):
 
     # 填补所有 NaN 的位置
     # 第一次预测
-    for i in range(len(iop_values)):
-        if np.isnan(iop_values[i]):  # 找到 NaN 的位置
+    for i in range(len(fill_values)):
+        if np.isnan(fill_values[i]):  # 找到 NaN 的位置
             # 确保有足够的滑动窗口
             if i >= window_size:
-                features = np.column_stack((age_values[i - window_size:i], iop_values[i - window_size:i]))
+                features = np.column_stack((age_values[i - window_size:i], fill_values[i - window_size:i]))
                 features[:, 1] = np.nan_to_num(features[:, 1])  # 替换 NaN 为 0
                 features = features.reshape((1, window_size, 2))  # 调整为 LSTM 输入格式
 
@@ -1067,29 +1409,29 @@ def Func_LSTM_predict_missing_values(model, test_data, window_size,scaler):
 
                 # 检查预测值是否为标量
                 if predicted.size == 1:
-                    iop_values[i] = predicted.item()  # 提取标量值并填补
+                    fill_values[i] = predicted.item()  # 提取标量值并填补
                 else:
                     print(f"预测值形状异常，位置: {i}, 预测值: {predicted}")
 
     # 第二次填补：向前/向后填补
-    for i in range(len(iop_values)):
-        if np.isnan(iop_values[i]):  # 找到剩余的 NaN
+    for i in range(len(fill_values)):
+        if np.isnan(fill_values[i]):  # 找到剩余的 NaN
             # 尝试向后填补
             j = i + 1
-            while j < len(iop_values) and np.isnan(iop_values[j]):
+            while j < len(fill_values) and np.isnan(fill_values[j]):
                 j += 1
-            if j < len(iop_values):  # 找到后面的非空值
-                iop_values[i] = iop_values[j]
+            if j < len(fill_values):  # 找到后面的非空值
+                fill_values[i] = fill_values[j]
             else:
                 # 如果无法向后填补，尝试向前填补
                 j = i - 1
-                while j >= 0 and np.isnan(iop_values[j]):
+                while j >= 0 and np.isnan(fill_values[j]):
                     j -= 1
                 if j >= 0:  # 找到前面的非空值
-                    iop_values[i] = iop_values[j]
+                    fill_values[i] = fill_values[j]
 
     # 返回填补后的数据
-    test_data['iop_values'] = iop_values
+    test_data[value_name] = fill_values
     return test_data
 
 
@@ -1110,17 +1452,22 @@ def Func_preprocess_and_slice_data(data, window_size=3):
     X, y = [], []
     grouped = data.groupby('ID')  # 按照ID分组
     for _, group in grouped:
-        iop_values = group['iop_values'].values
+        # iop_values = group['iop_values'].values
         age_values = group['age_values'].values
+        # gender_values = group['gender_values'].values
+        cdr_values = group['cdr_values'].values
+        # md_values = group['md_values'].values
+        # rnfl_values = group['rnfl_values'].values
+        # period_values = group['period_values'].values
 
         # 检查样本数量是否足够构建窗口
-        if len(iop_values) <= window_size:
+        if len(cdr_values) <= window_size:
             continue
 
-        for i in range(len(iop_values) - window_size):
+        for i in range(len(cdr_values) - window_size):
             # 构建特征矩阵 (age_values 和 iop_values)
-            features = np.column_stack((age_values[i:i + window_size], iop_values[i:i + window_size]))
-            target = iop_values[i + window_size]  # 窗口后面的目标值
+            features = np.column_stack((age_values[i:i + window_size], cdr_values[i:i + window_size]))
+            target = cdr_values[i + window_size]  # 窗口后面的目标值
 
             # 跳过包含 NaN 的窗口或目标值
             if np.isnan(features).any() or np.isnan(target):
@@ -1128,6 +1475,48 @@ def Func_preprocess_and_slice_data(data, window_size=3):
 
             X.append(features)
             y.append(target)
+
+    return np.array(X), np.array(y)
+
+
+def Func_Multi_preprocess_and_slice_data(data, window_size=3):
+    """
+    功能：
+    将数据分组并切片为时间序列格式。
+
+    输入：
+    - data (pd.DataFrame): 包含时间序列数据的DataFrame。
+    - window_size (int, 默认值=3): 时间窗口大小。
+
+    输出：
+    - X (numpy.ndarray): 输入特征数据，形状为 (样本数, 时间步长, 特征数)。
+    - y (numpy.ndarray): 输出目标数据，形状为 (样本数, 目标数)。
+    """
+    X, y = [], []
+    features = ['gender_values', 'age_values', 'iop_values', 'cdr_values', 'md_values', 'rnfl_values', 'period_values']
+    targets = ['iop_values', 'cdr_values', 'md_values', 'rnfl_values']
+
+    grouped = data.groupby('ID')  # 按照ID分组
+    for _, group in grouped:
+        # 获取特征和目标值
+        feature_values = group[features].values
+        target_values = group[targets].values
+
+        # 检查样本数量是否足够构建窗口
+        if len(feature_values) <= window_size:
+            continue
+
+        for i in range(len(feature_values) - window_size):
+            # 构建特征矩阵 (时间步长, 特征数)
+            features_window = feature_values[i:i + window_size]
+            targets_window = target_values[i + window_size]  # 窗口后面的目标值
+
+            # 跳过包含 NaN 的窗口或目标值
+            if np.isnan(features_window).any() or np.isnan(targets_window).any():
+                continue
+
+            X.append(features_window)
+            y.append(targets_window)
 
     return np.array(X), np.array(y)
 
@@ -1219,9 +1608,26 @@ def Func_Process_Inter_KNN(extend_path, extend_empty_path):
 
 def Func_Dataloader2(path):
     """
-    遍历文件夹，为每个患者文件绘制图表
+    遍历文件夹中的患者数据文件,读取并处理每个患者的数据。
+    主要功能包括:
+    1. 读取Excel文件中的患者数据
+    2. 提取并计算各项指标(眼压、杯盘比、视野等)
+    3. 生成时间序列扩展数据
+    4. 创建缺失数据用于后续分析
+
     参数:
     path (str): 包含患者Excel文件的文件夹路径
+
+    处理流程:
+    1. 创建输出目录
+    2. 遍历文件夹中的Excel文件
+    3. 对每个文件:
+       - 读取数据到DataFrame
+       - 初始化数据处理对象
+       - 提取并处理各项指标数据
+       - 计算差值指标
+       - 扩展时间序列
+       - 生成缺失数据
     """
     # 创建输出图表的文件夹（如果不存在）
 
@@ -1241,9 +1647,9 @@ def Func_Dataloader2(path):
             try:
                 # 读取Excel文件
                 df = pd.read_excel(file_path)
-                phandle = Phandle()
-                data_extend = Phandle()
-                data_extend_empty = Phandle()
+                phandle = Phandle()  # 初始化数据处理对象
+                data_extend = Phandle()  # 用于存储扩展后的数据
+                data_extend_empty = Phandle()  # 用于存储带有缺失值的数据
 
                 # phandle.ID = filename
                 # data_extend.ID = filename
@@ -1500,7 +1906,7 @@ def Func_output_excel(data_extend,path):
         'md_os_values': data_extend.md_os_values,
         'rnfl_od_values': data_extend.rnfl_od_values,
         'rnfl_os_values': data_extend.rnfl_os_values,
-        'period_values': data_extend.perid_values
+        'period_values': data_extend.period_values
     })
 
     # 输出成excel文件
@@ -1516,10 +1922,10 @@ def Func_create_missing_data(data):
 
         # 获取原始数据的值
         values = getattr(data, attribute)
-        if 'iop' in attribute:
+        # if 'iop' in attribute:
+        #     setattr(data_empty, attribute, Func_cmd_1(values, 0.15))
+        if 'cdr' in attribute:
             setattr(data_empty, attribute, Func_cmd_1(values, 0.15))
-        # elif 'cdr' in attribute:
-        #     setattr(data_empty, attribute, Func_cmd_1(values, 0.3))
         # elif 'md' in attribute:
         #     setattr(data_empty, attribute, Func_cmd_1(values, 0.15))
         # elif 'rnfl' in attribute:
@@ -1527,9 +1933,9 @@ def Func_create_missing_data(data):
 
     # 将 data_extend 转换为 DataFrame
 
-    if (len(data_empty.treat_dates)>2):
-        path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_empty_process'
-        Func_output_excel(data_empty, path)
+    # if (len(data_empty.treat_dates)>2):
+    #     path = r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_empty_process'
+    #     Func_output_excel(data_empty, path)
     return data_empty
 
 
@@ -1807,9 +2213,16 @@ def Func_plot(data, filename, output_path):
     print(f"成功为 {filename} 生成图表: {output_file}")
 
 
+
+# 6. 绘制ROC曲线
+
+
+
 # 主执行部分
 if __name__ == '__main__':
     os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+
     # 指定文件夹路径
     # folder_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data')
     # extend_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process')
@@ -1819,14 +2232,19 @@ if __name__ == '__main__':
     # extend_LSTM_test_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_LSTM_process\test')
     # extend_LSTM_val_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_LSTM_process\val')
 
-    extend_GAN_train_path =(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_GAN_process\train')
-    extend_GAN_test_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_GAN_process\test')
-    extend_GAN_val_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_GAN_process\val')
+    # extend_GAN_train_path =(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_GAN_process\train')
+    # extend_GAN_test_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_GAN_process\test')
+    # extend_GAN_val_path = (r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_GAN_process\val')
+    
+    # extend_LSTM_path =(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process')
+    # extend_LSTM_path_output =(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\vaild_data_extend_process_output')
     # 加载数据并绘制图表
     # Func_Dataloader2(folder_path)          #制造缺失数据和对比
     # Func_Process_Inter_LSTM(extend_LSTM_train_path, extend_LSTM_test_path,extend_LSTM_val_path)
+    # Func_Process_Multi_Inter_LSTM(extend_LSTM_train_path, extend_LSTM_test_path,extend_LSTM_val_path)
     # Func_Process_Inter_GAN_Multimodal(extend_GAN_train_path, extend_GAN_test_path,extend_GAN_val_path, gan_model_path=None)
-    Func_Process_Inter_tGAN_Multimodal(extend_GAN_train_path, extend_GAN_test_path, extend_GAN_val_path,tgan_model_path=None)
+    # Func_Process_Inter_tGAN_Multimodal(extend_GAN_train_path, extend_GAN_test_path, extend_GAN_val_path,tgan_model_path=None)
+    # Func_Inter_iopcdr_LSTM(extend_LSTM_path,extend_LSTM_path_output)
     # time_str = datetime.now().strftime('%Y%m%d_%H%M') + '/'
 
     # output_path = 'E:\BaiduSyncdisk\QZZ\data_generation\output' + '/' + time_str
