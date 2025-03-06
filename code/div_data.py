@@ -66,6 +66,31 @@ def check_columns_and_move(file_path, columns, dest_paths, condition):
     except Exception as e:
         print(f"Error processing file {os.path.basename(file_path)}: {e}")
 
+
+import os
+import shutil
+import pandas as pd
+
+def check_columns_and_move_vaild(file_path, columns, dest_paths, condition):
+    try:
+        df = pd.read_excel(file_path)
+
+        # 如果选中的列中有任何一列完全为空，直接移动到 empty 文件夹
+        for col_idx in columns:
+            if df.iloc[:, col_idx].dropna().empty:  # 如果该列所有行都没有数据
+                shutil.copy(file_path, dest_paths['empty'])  # 移动到 empty 文件夹
+                return  # 一旦发现有列为空，直接返回，不再做后续检查
+
+        # 如果所有选中的列都有数据，应用 condition 函数进行进一步验证
+        if condition(df, columns):
+            shutil.copy(file_path, dest_paths['full'])  # 移动到 valid 文件夹
+        else:
+            shutil.copy(file_path, dest_paths['empty'])  # 如果不符合 condition 条件，移动到 empty 文件夹
+
+    except Exception as e:
+        print(f"Error processing file {os.path.basename(file_path)}: {e}")
+
+
 def div_data_isNoempty(path, columns, full_path_suffix, empty_path_suffix):
     # 创建文件夹
     full_path = os.path.join(path+'/../', f'{full_path_suffix}')
@@ -77,7 +102,7 @@ def div_data_isNoempty(path, columns, full_path_suffix, empty_path_suffix):
     for filename in os.listdir(path):
         if filename.startswith('patient_') and filename.endswith('.xlsx'):
             file_path = os.path.join(path, filename)
-            check_columns_and_move(file_path, columns, {'full': full_path, 'empty': empty_path}, lambda df, cols: all(df.iloc[:, col].shape[0]==df.iloc[:, 1].shape[0] and df.iloc[:, col].dropna().shape[0] > 2 for col in cols))
+            check_columns_and_move_vaild(file_path, columns, {'full': full_path, 'empty': empty_path}, lambda df, cols: all(df.iloc[:, col].shape[0]==df.iloc[:, 1].shape[0] and df.iloc[:, col].dropna().shape[0] > 1 for col in cols))
 
 
 
@@ -121,18 +146,18 @@ def div_data_isVaild(path, columns, full_path_suffix, empty_path_suffix):
 #
 
 
-# div_data_isNoempty(
-#     path=path,
-#     columns=[9, 10, 11, 12],  # IOP and Ratio columns
-#     full_path_suffix='iopandratio',
-#     empty_path_suffix='iopandratio_empty'
-# )
+div_data_isNoempty(
+    path=r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\fill_data',
+    columns=[10,11],  # IOP and Ratio columns
+    full_path_suffix='vaild_md_data',
+    empty_path_suffix='vaild_md_data_empty'
+)
 
 # div_data_isVaild(
-#     path=path,
-#     columns=[1],  # all columns
-#     full_path_suffix='vaild_data',
-#     empty_path_suffix='vaild_data_empty'
+#     path=r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata\fill_data',
+#     columns=[10,11],  # all columns
+#     full_path_suffix='vaild_md_data',
+#     empty_path_suffix='vaild_md_data_empty'
 # )
 
 # div_data_iopandratio_isNoempty(r'E:\BaiduSyncdisk\QZZ\data_generation\data_generation\divdata')

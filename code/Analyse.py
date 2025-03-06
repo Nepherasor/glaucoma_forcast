@@ -133,11 +133,11 @@ fpr_KNN, tpr_KNN, roc_auc_KNN = calculate_roc_metrics(true_values_KNN, pred_valu
 true_values_LSTM, pred_values_LSTM = Func_read_data_result(path_LSTM)
 fpr_LSTM, tpr_LSTM, roc_auc_LSTM = calculate_roc_metrics(true_values_LSTM, pred_values_LSTM, threshold=0.1)
     
-    # GAN
+    # GAIN
 true_values_GAN, pred_values_GAN = Func_read_data_result(path_GAN)
 fpr_GAN, tpr_GAN, roc_auc_GAN = calculate_roc_metrics(true_values_GAN, pred_values_GAN, threshold=0.1)
     
-    # TGAN
+    # Random Forest
 true_values_TGAN, pred_values_TGAN = Func_read_data_result(path_TGAN)
 fpr_TGAN, tpr_TGAN, roc_auc_TGAN = calculate_roc_metrics(true_values_TGAN, pred_values_TGAN, threshold=0.1)
 plot_roc_curve(fpr_KNN, tpr_KNN, roc_auc_KNN, fpr_LSTM, tpr_LSTM, roc_auc_LSTM, fpr_GAN, tpr_GAN, roc_auc_GAN, fpr_TGAN, tpr_TGAN, roc_auc_TGAN)

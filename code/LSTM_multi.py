@@ -11,8 +11,8 @@ from tensorflow.keras.optimizers import Adam
 import joblib
 from tensorflow.keras.models import load_model
 
-features = ['gender', 'age', 'iop', 'cdr', 'period']
-targets = ['iop', 'cdr']
+features = ['gender', 'age', 'iop', 'cdr', 'period','md','rnfl']
+targets = ['md','rnfl']
 
 # 定义数据加载器
 class Phandle:
@@ -167,8 +167,8 @@ def Func_Process_Multi_Inter_LSTM(extend_path,test_path):
                         'age_values': [data_extend.age_values, data_extend.age_values],
                         'iop_values': [data_extend.iop_od_values, data_extend.iop_os_values],
                         'cdr_values': [data_extend.cdr_od_values, data_extend.cdr_os_values],
-                        # 'md_values': [data_extend.md_od_values, data_extend.md_os_values],
-                        # 'rnfl_values': [data_extend.rnfl_od_values, data_extend.rnfl_os_values],
+                        'md_values': [data_extend.md_od_values, data_extend.md_os_values],
+                        'rnfl_values': [data_extend.rnfl_od_values, data_extend.rnfl_os_values],
                         'period_values': [data_extend.period_values, data_extend.period_values]
                     }
 
@@ -180,8 +180,8 @@ def Func_Process_Multi_Inter_LSTM(extend_path,test_path):
                             'age': eye_data['age_values'][i],
                             'iop': eye_data['iop_values'][i],
                             'cdr': eye_data['cdr_values'][i],
-                            # 'md': eye_data['md_values'][i],
-                            # 'rnfl': eye_data['rnfl_values'][i],
+                            'md': eye_data['md_values'][i],
+                            'rnfl': eye_data['rnfl_values'][i],
                             'period': eye_data['period_values'][i]
                         })
                         data_Process_Inter_LSTM_all.append(df)
@@ -212,7 +212,7 @@ def Func_Process_Multi_Inter_LSTM(extend_path,test_path):
 
 
         train_data = scaled_data.iloc[:train_size]
-        val_data = scaled_data.iloc[train_size:train_size + val_size]
+        val_data = scaled_data.iloc[train_size:(train_size + val_size)]
 
         X_train, M_train, y_train = create_sequences(train_data)
         X_val, M_val, y_val = create_sequences(val_data)
